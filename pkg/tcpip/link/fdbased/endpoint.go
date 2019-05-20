@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"syscall"
 
+	"golang.org/x/sys/unix"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/buffer"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/header"
@@ -65,8 +66,10 @@ const (
 )
 
 type endpoint struct {
-	// fd is the file descriptor used to send and receive packets.
-	fd int
+	// fds is the set of file descriptors each identifying one inbound/outbound
+	// channel. The endpoint will dispatch from all inbound channels as well as
+	// hash outbound packets to specific channels based on the packet hash.
+	fds []int
 
 	// mtu (maximum transmission unit) is the maximum size of a packet.
 	mtu uint32
@@ -85,8 +88,8 @@ type endpoint struct {
 	// its end of the communication pipe.
 	closed func(*tcpip.Error)
 
-	inboundDispatcher linkDispatcher
-	dispatcher        stack.NetworkDispatcher
+	inboundDispatchers []linkDispatcher
+	dispatcher         stack.NetworkDispatcher
 
 	// packetDispatchMode controls the packet dispatcher used by this
 	// endpoint.
@@ -100,6 +103,7 @@ type endpoint struct {
 // Options specify the details about the fd-based endpoint to be created.
 type Options struct {
 	FD                 int
+	FDs                []int
 	MTU                uint32
 	EthernetHeader     bool
 	ClosedFunc         func(*tcpip.Error)
@@ -144,8 +148,11 @@ func New(opts *Options) (tcpip.LinkEndpointID, error) {
 		caps |= stack.CapabilityDisconnectOk
 	}
 
+	if len(opts.FDs) == 0 {
+		opts.FDs = []int{opts.FD}
+	}
 	e := &endpoint{
-		fd:                 opts.FD,
+		fds:                opts.FDs,
 		mtu:                opts.MTU,
 		caps:               caps,
 		closed:             opts.ClosedFunc,
@@ -154,46 +161,67 @@ func New(opts *Options) (tcpip.LinkEndpointID, error) {
 		packetDispatchMode: opts.PacketDispatchMode,
 	}
 
-	isSocket, err := isSocketFD(e.fd)
-	if err != nil {
-		return 0, err
-	}
-	if isSocket {
-		if opts.GSOMaxSize != 0 {
-			e.caps |= stack.CapabilityGSO
-			e.gsoMaxSize = opts.GSOMaxSize
+	// Create per channel dispatchers.
+	for i := 0; i < len(e.fds); i++ {
+		fd := e.fds[i]
+		isSocket, err := isSocketFD(fd)
+		if err != nil {
+			return 0, err
 		}
-	}
-	e.inboundDispatcher, err = createInboundDispatcher(e, isSocket)
-	if err != nil {
-		return 0, fmt.Errorf("createInboundDispatcher(...) = %v", err)
+		if isSocket {
+			if opts.GSOMaxSize != 0 {
+				e.caps |= stack.CapabilityGSO
+				e.gsoMaxSize = opts.GSOMaxSize
+			}
+		}
+		inboundDispatcher, err := createInboundDispatcher(e, fd, isSocket)
+		if err != nil {
+			return 0, fmt.Errorf("createInboundDispatcher(...) = %v", err)
+		}
+		e.inboundDispatchers = append(e.inboundDispatchers, inboundDispatcher)
 	}
 
 	return stack.RegisterLinkEndpoint(e), nil
 }
 
-func createInboundDispatcher(e *endpoint, isSocket bool) (linkDispatcher, error) {
+func createInboundDispatcher(e *endpoint, fd int, isSocket bool) (linkDispatcher, error) {
 	// By default use the readv() dispatcher as it works with all kinds of
 	// FDs (tap/tun/unix domain sockets and af_packet).
-	inboundDispatcher, err := newReadVDispatcher(e.fd, e)
+	inboundDispatcher, err := newReadVDispatcher(fd, e)
 	if err != nil {
-		return nil, fmt.Errorf("newReadVDispatcher(%d, %+v) = %v", e.fd, e, err)
+		return nil, fmt.Errorf("newReadVDispatcher(%d, %+v) = %v", fd, e, err)
 	}
 
 	if isSocket {
+		sa, err := unix.Getsockname(fd)
+		if err != nil {
+			return nil, fmt.Errorf("unix.Getsockname(%d) = %v", fd, err)
+		}
+		switch sa.(type) {
+		case *unix.SockaddrLinklayer:
+			// enable PACKET_FANOUT mode is the underlying socket is
+			// of type AF_PACKET.
+			const fanoutID = 1
+			const fanoutType = 0x8000 // PACKET_FANOUT_HASH | PACKET_FANOUT_FLAG_DEFRAG
+			fanoutArg := fanoutID | fanoutType<<16
+			if err := syscall.SetsockoptInt(fd, syscall.SOL_PACKET, unix.PACKET_FANOUT, fanoutArg); err != nil {
+				return nil, fmt.Errorf("failed to enable PACKET_FANOUT option: %v", err)
+			}
+		}
+
 		switch e.packetDispatchMode {
 		case PacketMMap:
-			inboundDispatcher, err = newPacketMMapDispatcher(e.fd, e)
+			inboundDispatcher, err = newPacketMMapDispatcher(fd, e)
 			if err != nil {
-				return nil, fmt.Errorf("newPacketMMapDispatcher(%d, %+v) = %v", e.fd, e, err)
+				return nil, fmt.Errorf("newPacketMMapDispatcher(%d, %+v) = %v", fd, e, err)
 			}
 		case RecvMMsg:
 			// If the provided FD is a socket then we optimize
 			// packet reads by using recvmmsg() instead of read() to
 			// read packets in a batch.
-			inboundDispatcher, err = newRecvMMsgDispatcher(e.fd, e)
+			inboundDispatcher, err = newRecvMMsgDispatcher(fd, e)
 			if err != nil {
-				return nil, fmt.Errorf("newRecvMMsgDispatcher(%d, %+v) = %v", e.fd, e, err)
+				return nil, fmt.Errorf("newRecvMMsgDispatcher(%d, %+v) = %v", fd, e, err)
 			}
 		}
 	}
@@ -215,7 +243,9 @@ func (e *endpoint) Attach(dispatcher stack.NetworkDispatcher) {
 	// Link endpoints are not savable. When transportation endpoints are
 	// saved, they stop sending outgoing packets and all incoming packets
 	// are rejected.
-	go e.dispatchLoop() // S/R-SAFE: See above.
+	for i := range e.inboundDispatchers {
+		go e.dispatchLoop(e.inboundDispatchers[i]) // S/R-SAFE: See above.
+	}
 }
 
 // IsAttached implements stack.LinkEndpoint.IsAttached.
@@ -305,26 +335,26 @@ func (e *endpoint) WritePacket(r *stack.Route, gso *stack.GSO, hdr buffer.Prepen
 			}
 		}
 
-		return rawfile.NonBlockingWrite3(e.fd, vnetHdrBuf, hdr.View(), payload.ToView())
+		return rawfile.NonBlockingWrite3(e.fds[0], vnetHdrBuf, hdr.View(), payload.ToView())
 	}
 
 	if payload.Size() == 0 {
-		return rawfile.NonBlockingWrite(e.fd, hdr.View())
+		return rawfile.NonBlockingWrite(e.fds[0], hdr.View())
 	}
 
-	return rawfile.NonBlockingWrite3(e.fd, hdr.View(), payload.ToView(), nil)
+	return rawfile.NonBlockingWrite3(e.fds[0], hdr.View(), payload.ToView(), nil)
 }
 
 // WriteRawPacket writes a raw packet directly to the file descriptor.
 func (e *endpoint) WriteRawPacket(dest tcpip.Address, packet []byte) *tcpip.Error {
-	return rawfile.NonBlockingWrite(e.fd, packet)
+	return rawfile.NonBlockingWrite(e.fds[0], packet)
 }
 
 // dispatchLoop reads packets from the file descriptor in a loop and dispatches
 // them to the network stack.
-func (e *endpoint) dispatchLoop() *tcpip.Error {
+func (e *endpoint) dispatchLoop(inboundDispatcher linkDispatcher) *tcpip.Error {
 	for {
-		cont, err := e.inboundDispatcher.dispatch()
+		cont, err := inboundDispatcher.dispatch()
 		if err != nil || !cont {
 			if e.closed != nil {
 				e.closed(err)
@@ -363,7 +393,7 @@ func NewInjectable(fd int, mtu uint32, capabilities stack.LinkEndpointCapabiliti
 	syscall.SetNonblock(fd, true)
 
 	e := &InjectableEndpoint{endpoint: endpoint{
-		fd:   fd,
+		fds:  []int{fd},
 		mtu:  mtu,
 		caps: capabilities,
 	}}
