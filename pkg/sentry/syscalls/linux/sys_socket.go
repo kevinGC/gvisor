@@ -460,7 +460,11 @@ func GetSockOpt(t *kernel.Task, args arch.SyscallArguments) (uintptr, *kernel.Sy
 	}
 
 	// Call syscall implementation then copy both value and value len out.
-	v, e := getSockOpt(t, s, int(level), int(name), int(optLen))
+	// <<<<<<< HEAD
+	// 	v, e := getSockOpt(t, s, int(level), int(name), int(optLen))
+	// =======
+	v, e := s.GetSockOpt(t, int(level), int(name), optValAddr, int(optLen))
+	// >>>>>>> Add ability to read iptables data structures.
 	if e != nil {
 		return 0, nil, e.ToError()
 	}

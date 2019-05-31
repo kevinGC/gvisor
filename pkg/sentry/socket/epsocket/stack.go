@@ -15,9 +15,11 @@
 package epsocket
 
 import (
+	"github.com/kevinGC/gvisor/pkg/tcpip/iptables"
 	"gvisor.dev/gvisor/pkg/abi/linux"
 	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/sentry/inet"
+	"gvisor.dev/gvisor/pkg/sentry/socket/netfilter"
 	"gvisor.dev/gvisor/pkg/syserr"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
@@ -142,4 +144,12 @@ func (s *Stack) SetTCPSACKEnabled(enabled bool) error {
 // Statistics implements inet.Stack.Statistics.
 func (s *Stack) Statistics(stat interface{}, arg string) error {
 	return syserr.ErrEndpointOperation.ToError()
+}
+
+func (s *Stack) IPTables() (iptables.IPTables, error) {
+	return s.Stack.IPTables(), nil
+}
+
+func (s *Stack) FillDefaultIPTables() error {
+	return netfilter.FillDefaultIPTables(s.Stack)
 }

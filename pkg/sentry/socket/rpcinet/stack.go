@@ -23,7 +23,9 @@ import (
 	"gvisor.dev/gvisor/pkg/sentry/socket/rpcinet/conn"
 	"gvisor.dev/gvisor/pkg/sentry/socket/rpcinet/notifier"
 	"gvisor.dev/gvisor/pkg/syserr"
+	"gvisor.dev/gvisor/pkg/tcpip/iptables"
 	"gvisor.dev/gvisor/pkg/unet"
+	"gvisor.googlesource.com/gvisor/pkg/syserror"
 )
 
 // Stack implements inet.Stack for RPC backed sockets.
@@ -137,4 +139,9 @@ func (s *Stack) SetTCPSACKEnabled(enabled bool) error {
 // Statistics implements inet.Stack.Statistics.
 func (s *Stack) Statistics(stat interface{}, arg string) error {
 	return syserr.ErrEndpointOperation.ToError()
+}
+
+// IPTables implements inet.Stack.IPTables.
+func (s *Stack) IPTables() (iptables.IPTables, error) {
+	return iptables.IPTables{}, syserror.EINVAL
 }

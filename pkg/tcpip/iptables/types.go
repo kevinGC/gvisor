@@ -128,6 +128,10 @@ type Table struct {
 	// UserChains, and its purpose is to make looking up tables by name
 	// fast.
 	Chains map[string]*Chain
+
+	// Metadata holds information about the Table that is useful to users
+	// of IPTables, but not to the netstack IPTables code itself.
+	metadata interface{}
 }
 
 // ValidHooks returns a bitmap of the builtin hooks for the given table.
@@ -137,6 +141,16 @@ func (table *Table) ValidHooks() (uint32, *tcpip.Error) {
 		hooks |= 1 << hook
 	}
 	return hooks, nil
+}
+
+// Precondition: IPTables.mu must be locked for reading.
+func (table *Table) Metadata() interface{} {
+	return table.metadata
+}
+
+// Precondition: IPTables.mu must be locked for reading.
+func (table *Table) SetMetadata(metadata interface{}) {
+	table.metadata = metadata
 }
 
 // A Chain defines a list of rules for packet processing. When a packet

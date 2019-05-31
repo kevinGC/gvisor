@@ -851,6 +851,10 @@ func newEmptyNetworkStack(conf *Config, clock tcpip.Clock) (inet.Stack, error) {
 			return nil, fmt.Errorf("SetTransportProtocolOption failed: %v", err)
 		}
 
+		if err := s.FillDefaultIPTables(); err != nil {
+			return nil, fmt.Errorf("failed to fill IPTables: %v", err)
+		}
+
 		return &s, nil
 
 	default:
