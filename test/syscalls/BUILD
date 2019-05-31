@@ -136,6 +136,8 @@ syscall_test(
     test = "//test/syscalls/linux:ioctl_test",
 )
 
+syscall_test(test = "//test/syscalls/linux:iptables_test")
+
 syscall_test(
     size = "medium",
     test = "//test/syscalls/linux:itimer_test",

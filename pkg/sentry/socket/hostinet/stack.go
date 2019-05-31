@@ -27,6 +27,7 @@ import (
 	"gvisor.googlesource.com/gvisor/pkg/sentry/inet"
 	"gvisor.googlesource.com/gvisor/pkg/sentry/usermem"
 	"gvisor.googlesource.com/gvisor/pkg/syserror"
+	"gvisor.googlesource.com/gvisor/pkg/tcpip/iptables"
 )
 
 var defaultRecvBufSize = inet.TCPBufferSize{
@@ -243,4 +244,9 @@ func (s *Stack) TCPSACKEnabled() (bool, error) {
 // SetTCPSACKEnabled implements inet.Stack.SetTCPSACKEnabled.
 func (s *Stack) SetTCPSACKEnabled(enabled bool) error {
 	return syserror.EACCES
+}
+
+// IPTables implements inet.Stack.IPTables.
+func (s *Stack) IPTables() (iptables.IPTables, error) {
+	return iptables.IPTables{}, syserror.EINVAL
 }

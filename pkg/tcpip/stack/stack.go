@@ -32,6 +32,7 @@ import (
 	"gvisor.googlesource.com/gvisor/pkg/tcpip"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/buffer"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/header"
+	"gvisor.googlesource.com/gvisor/pkg/tcpip/iptables"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/ports"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/seqnum"
 	"gvisor.googlesource.com/gvisor/pkg/waiter"
@@ -327,6 +328,9 @@ type Stack struct {
 
 	// handleLocal allows non-loopback interfaces to loop packets.
 	handleLocal bool
+
+	// tables are the iptables packet filtering and manipulation rules.
+	tables iptables.IPTables
 }
 
 // Options contains optional Stack configuration.
@@ -1092,4 +1096,12 @@ func (s *Stack) LeaveGroup(protocol tcpip.NetworkProtocolNumber, nicID tcpip.NIC
 		return nic.leaveGroup(multicastAddr)
 	}
 	return tcpip.ErrUnknownNICID
+}
+
+func (s *Stack) IPTables() iptables.IPTables {
+	return s.tables
+}
+
+func (s *Stack) SetIPTables(ipt iptables.IPTables) {
+	s.tables = ipt
 }

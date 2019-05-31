@@ -466,7 +466,7 @@ func GetSockOpt(t *kernel.Task, args arch.SyscallArguments) (uintptr, *kernel.Sy
 	}
 
 	// Call syscall implementation then copy both value and value len out.
-	v, e := s.GetSockOpt(t, int(level), int(name), int(optLen))
+	v, e := s.GetSockOpt(t, int(level), int(name), optValAddr, int(optLen))
 	if e != nil {
 		return 0, nil, e.ToError()
 	}

@@ -38,6 +38,7 @@ go_library(
         "//pkg/syserror",
         "//pkg/tcpip",
         "//pkg/tcpip/buffer",
+	"//pkg/tcpip/iptables",
         "//pkg/unet",
         "//pkg/waiter",
     ],

@@ -804,6 +804,9 @@ func newEmptyNetworkStack(conf *Config, clock tcpip.Clock) (inet.Stack, error) {
 		if err := s.Stack.SetTransportProtocolOption(tcp.ProtocolNumber, tcp.SACKEnabled(true)); err != nil {
 			return nil, fmt.Errorf("failed to enable SACK: %v", err)
 		}
+		if err := s.FillDefaultIPTables(); err != nil {
+			return nil, fmt.Errorf("failed to fill IPTables: %v", err)
+		}
 		return &s, nil
 
 	default:

@@ -15,6 +15,8 @@
 // Package inet defines semantics for IP stacks.
 package inet
 
+import "gvisor.googlesource.com/gvisor/pkg/tcpip/iptables"
+
 // Stack represents a TCP/IP stack.
 type Stack interface {
 	// Interfaces returns all network interfaces as a mapping from interface
@@ -49,6 +51,9 @@ type Stack interface {
 	// SetTCPSACKEnabled attempts to change TCP selective acknowledgement
 	// settings.
 	SetTCPSACKEnabled(enabled bool) error
+
+	// IPTables gets iptables rules from the stack.
+	IPTables() (iptables.IPTables, error)
 }
 
 // Interface contains information about a network interface.

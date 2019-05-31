@@ -18,7 +18,9 @@ import (
 	"gvisor.googlesource.com/gvisor/pkg/abi/linux"
 	"gvisor.googlesource.com/gvisor/pkg/log"
 	"gvisor.googlesource.com/gvisor/pkg/sentry/inet"
+	"gvisor.googlesource.com/gvisor/pkg/sentry/socket/netfilter"
 	"gvisor.googlesource.com/gvisor/pkg/syserr"
+	"gvisor.googlesource.com/gvisor/pkg/tcpip/iptables"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/network/ipv6"
 	"gvisor.googlesource.com/gvisor/pkg/tcpip/stack"
@@ -137,4 +139,12 @@ func (s *Stack) TCPSACKEnabled() (bool, error) {
 // SetTCPSACKEnabled implements inet.Stack.SetTCPSACKEnabled.
 func (s *Stack) SetTCPSACKEnabled(enabled bool) error {
 	return syserr.TranslateNetstackError(s.Stack.SetTransportProtocolOption(tcp.ProtocolNumber, tcp.SACKEnabled(enabled))).ToError()
+}
+
+func (s *Stack) IPTables() (iptables.IPTables, error) {
+	return s.Stack.IPTables(), nil
+}
+
+func (s *Stack) FillDefaultIPTables() error {
+	return netfilter.FillDefaultIPTables(s.Stack)
 }
