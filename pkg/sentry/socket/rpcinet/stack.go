@@ -23,9 +23,9 @@ import (
 	"gvisor.dev/gvisor/pkg/sentry/socket/rpcinet/conn"
 	"gvisor.dev/gvisor/pkg/sentry/socket/rpcinet/notifier"
 	"gvisor.dev/gvisor/pkg/syserr"
+	"gvisor.dev/gvisor/pkg/syserror"
 	"gvisor.dev/gvisor/pkg/tcpip/iptables"
 	"gvisor.dev/gvisor/pkg/unet"
-	"gvisor.googlesource.com/gvisor/pkg/syserror"
 )
 
 // Stack implements inet.Stack for RPC backed sockets.

@@ -15,7 +15,7 @@
 // Package inet defines semantics for IP stacks.
 package inet
 
-import "gvisor.googlesource.com/gvisor/pkg/tcpip/iptables"
+import "gvisor.dev/gvisor/pkg/tcpip/iptables"
 
 // Stack represents a TCP/IP stack.
 type Stack interface {
