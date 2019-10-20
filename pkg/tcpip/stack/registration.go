@@ -143,11 +143,13 @@ type TransportDispatcher interface {
 	// DeliverTransportPacket delivers packets to the appropriate
 	// transport protocol endpoint. It also returns the network layer
 	// header for the enpoint to inspect or pass up the stack.
-	DeliverTransportPacket(r *Route, protocol tcpip.TransportProtocolNumber, netHeader buffer.View, vv buffer.VectorisedView)
+	// TODO: Remove protocol?
+	DeliverTransportPacket(r *Route, protocol tcpip.TransportProtocolNumber, pb *buffer.PacketBuffer)
 
 	// DeliverTransportControlPacket delivers control packets to the
 	// appropriate transport protocol endpoint.
-	DeliverTransportControlPacket(local, remote tcpip.Address, net tcpip.NetworkProtocolNumber, trans tcpip.TransportProtocolNumber, typ ControlType, extra uint32, vv buffer.VectorisedView)
+	// TODO: Remove protocol?
+	DeliverTransportControlPacket(local, remote tcpip.Address, net tcpip.NetworkProtocolNumber, trans tcpip.TransportProtocolNumber, typ ControlType, extra uint32, pb *buffer.PacketBuffer)
 }
 
 // PacketLooping specifies where an outbound packet should be sent.
@@ -261,7 +263,7 @@ type NetworkDispatcher interface {
 	// DeliverNetworkPacket finds the appropriate network protocol endpoint
 	// and hands the packet over for further processing. linkHeader may have
 	// length 0 when the caller does not have ethernet data.
-	DeliverNetworkPacket(linkEP LinkEndpoint, remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, vv buffer.VectorisedView, linkHeader buffer.View)
+	DeliverNetworkPacket(linkEP LinkEndpoint, remote, local tcpip.LinkAddress, pb *buffer.PacketBuffer)
 }
 
 // LinkEndpointCapabilities is the type associated with the capabilities

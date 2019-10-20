@@ -18,4 +18,5 @@ require (
 	github.com/vishvananda/netns v0.0.0-20171111001504-be1fbeda1936
 	golang.org/x/net v0.0.0-20190311183353-d8887717615a
 	golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a
+	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
 )
