@@ -78,9 +78,10 @@ func (q *queueBuffers) cleanup() {
 }
 
 type packetInfo struct {
-	addr  tcpip.LinkAddress
-	proto tcpip.NetworkProtocolNumber
-	vv    buffer.VectorisedView
+	addr       tcpip.LinkAddress
+	proto      tcpip.NetworkProtocolNumber
+	vv         buffer.VectorisedView
+	linkHeader buffer.View
 }
 
 type testContext struct {

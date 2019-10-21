@@ -99,6 +99,22 @@ type PacketEndpoint interface {
 	HandlePacket(nicid tcpip.NICID, addr tcpip.LinkAddress, netProto tcpip.NetworkProtocolNumber, pb *buffer.PacketBuffer)
 }
 
+// PacketEndpoint is the interface that needs to be implemented by packet
+// transport protocol endpoints. These endpoints receive link layer headers in
+// addition to whatever they contain (usually network and transport layer
+// headers and a payload).
+type PacketEndpoint interface {
+	// HandlePacket is called by the stack when new packets arrive that
+	// match the endpoint.
+	//
+	// Implementers should treat packet as immutable and should copy it
+	// before before modification.
+	//
+	// linkHeader may have a length of 0, in which case the PacketEndpoint
+	// should construct its own ethernet header for applications.
+	HandlePacket(nicid tcpip.NICID, addr tcpip.LinkAddress, netProto tcpip.NetworkProtocolNumber, packet buffer.VectorisedView, linkHeader buffer.View)
+}
+
 // TransportProtocol is the interface that needs to be implemented by transport
 // protocols (e.g., tcp, udp) that want to be part of the networking stack.
 type TransportProtocol interface {
