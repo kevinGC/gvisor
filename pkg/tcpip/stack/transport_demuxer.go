@@ -332,7 +332,7 @@ var loopbackSubnet = func() tcpip.Subnet {
 // deliverPacket attempts to find one or more matching transport endpoints, and
 // then, if matches are found, delivers the packet to them. Returns true if it
 // found one or more endpoints, false otherwise.
-func (d *transportDemuxer) deliverPacket(r *Route, protocol tcpip.TransportProtocolNumber, netHeader buffer.View, vv buffer.VectorisedView, id TransportEndpointID) bool {
+func (d *transportDemuxer) deliverPacket(r *Route, protocol tcpip.TransportProtocolNumber, pb *buffer.PacketBuffer, id TransportEndpointID) bool {
 	eps, ok := d.protocol[protocolIDs{r.NetProto, protocol}]
 	if !ok {
 		return false
@@ -345,8 +345,8 @@ func (d *transportDemuxer) deliverPacket(r *Route, protocol tcpip.TransportProto
 	// transport endpoints.
 	var destEps []*endpointsByNic
 	if protocol == header.UDPProtocolNumber && isMulticastOrBroadcast(id.LocalAddress) {
-		destEps = d.findAllEndpointsLocked(eps, vv, id)
-	} else if ep := d.findEndpointLocked(eps, vv, id); ep != nil {
+		destEps = d.findAllEndpointsLocked(eps, pb, id)
+	} else if ep := d.findEndpointLocked(eps, pb, id); ep != nil {
 		destEps = append(destEps, ep)
 	}
 
@@ -363,7 +363,7 @@ func (d *transportDemuxer) deliverPacket(r *Route, protocol tcpip.TransportProto
 
 	// Deliver the packet.
 	for _, ep := range destEps {
-		ep.handlePacket(r, id, vv)
+		ep.handlePacket(r, id, pb)
 	}
 
 	return true
@@ -371,7 +371,7 @@ func (d *transportDemuxer) deliverPacket(r *Route, protocol tcpip.TransportProto
 
 // deliverRawPacket attempts to deliver the given packet and returns whether it
 // was delivered successfully.
-func (d *transportDemuxer) deliverRawPacket(r *Route, protocol tcpip.TransportProtocolNumber, netHeader buffer.View, vv buffer.VectorisedView) bool {
+func (d *transportDemuxer) deliverRawPacket(r *Route, protocol tcpip.TransportProtocolNumber, pb *buffer.Packet) bool {
 	eps, ok := d.protocol[protocolIDs{r.NetProto, protocol}]
 	if !ok {
 		return false
@@ -385,7 +385,7 @@ func (d *transportDemuxer) deliverRawPacket(r *Route, protocol tcpip.TransportPr
 	for _, rawEP := range eps.rawEndpoints {
 		// Each endpoint gets its own copy of the packet for the sake
 		// of save/restore.
-		rawEP.HandlePacket(r, buffer.NewViewFromBytes(netHeader), vv.ToView().ToVectorisedView())
+		rawEP.HandlePacket(r, pb)
 		foundRaw = true
 	}
 	eps.mu.RUnlock()

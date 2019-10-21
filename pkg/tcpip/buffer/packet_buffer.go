@@ -17,8 +17,10 @@ package buffer
 // A PacketBuffer contains all the data of a network packet.
 type PacketBuffer struct {
 	// Data holds the payload of the packet. For inbound packets, it also holds
-	// all the headers.
+	// all the headers, which are consumed as the packet moves up the stack.
 	Data VectorisedView
+
+	// Unparsed hold the same information as Data. For inbound packets, it is
 
 	// Headers holds the link, network, and transport headers of outbound
 	// packets.
