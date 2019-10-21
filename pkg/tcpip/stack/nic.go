@@ -821,7 +821,7 @@ func (n *NIC) DeliverTransportControlPacket(local, remote tcpip.Address, net tcp
 	}
 
 	id := TransportEndpointID{srcPort, local, dstPort, remote}
-	if n.stack.demux.deliverControlPacket(n, net, trans, typ, extra, pb.Data, id) {
+	if n.stack.demux.deliverControlPacket(n, net, trans, typ, extra, pb, id) {
 		return
 	}
 }

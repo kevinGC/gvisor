@@ -299,7 +299,11 @@ func (d *recvMMsgDispatcher) dispatch() (bool, *tcpip.Error) {
 		used := d.capViews(k, int(n), BufConfig)
 		vv := buffer.NewVectorisedView(int(n), d.views[k][:used])
 		vv.TrimFront(d.e.hdrSize)
-		d.e.dispatcher.DeliverNetworkPacket(d.e, remote, local, p, vv, buffer.View(eth))
+		pb := buffer.PacketBuffer{
+			Data:       vv,
+			LinkHeader: buffer.View(eth),
+		}
+		d.e.dispatcher.DeliverNetworkPacket(d.e, remote, local, p, &pb)
 
 		// Prepare e.views for another packet: release used views.
 		for i := 0; i < used; i++ {

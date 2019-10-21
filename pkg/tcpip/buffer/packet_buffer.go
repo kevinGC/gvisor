@@ -16,8 +16,10 @@ package buffer
 
 // A PacketBuffer contains all the data of a network packet.
 type PacketBuffer struct {
-	// Data holds the payload of the packet. For inbound packets, it also holds
-	// all the headers, which are consumed as the packet moves up the stack.
+	// Data holds the payload of the packet. For inbound packets, it also
+	// holds all the headers, which are consumed as the packet moves up the
+	// stack.  The bytes backing Data are immutable, but Data itself may be
+	// trimmed or otherwise modified.
 	Data VectorisedView
 
 	// Unparsed hold the same information as Data. For inbound packets, it is
@@ -26,9 +28,25 @@ type PacketBuffer struct {
 	// packets.
 	Headers Prependable
 
-	// All of the below are slices within Data.
+	// All of the below are slices within Data. The bytes backing these
+	// views are immutable.
 	LinkHeader      View
 	NetworkHeader   View
 	TransportHeader View
 	Payload         View
 }
+
+func (pb *PacketBuffer) Clone() *PacketBuffer {
+	return &PacketBuffer{
+		Data:            pb.Data.Clone(nil),
+		Headers:         pb.Headers, // TODO: Maybe deep copy.
+		LinkHeader:      pb.LinkHeader,
+		NetworkHeader:   pb.NetworkHeader,
+		TransportHeader: pb.TransportHeader,
+		Payload:         pb.Payload,
+	}
+}
+
+// func (pb *PacketBuffer) DeepCopy() *PacketBuffer {
+
+// }

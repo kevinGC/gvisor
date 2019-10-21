@@ -87,8 +87,8 @@ func (e *endpoint) WriteHeaderIncludedPacket(r *stack.Route, payload buffer.Vect
 	return tcpip.ErrNotSupported
 }
 
-func (e *endpoint) HandlePacket(r *stack.Route, vv buffer.VectorisedView) {
-	v := vv.First()
+func (e *endpoint) HandlePacket(r *stack.Route, pb *buffer.PacketBuffer) {
+	v := pb.Data.First()
 	h := header.ARP(v)
 	if !h.IsValid() {
 		return

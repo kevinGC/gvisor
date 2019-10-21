@@ -116,7 +116,13 @@ func (e *endpoint) WritePacket(r *stack.Route, gso *stack.GSO, hdr buffer.Prepen
 		views = append(views, payload.Views()...)
 		vv := buffer.NewVectorisedView(len(views[0])+payload.Size(), views)
 		loopedR := r.MakeLoopedRoute()
-		e.HandlePacket(&loopedR, vv)
+
+		// TODO: Headers, Payload.
+		pb := buffer.PacketBuffer{
+			Data: vv,
+		}
+		e.HandlePacket(&loopedR, &pb)
+
 		loopedR.Release()
 	}
 	if loop&stack.PacketOut == 0 {
@@ -136,24 +142,24 @@ func (*endpoint) WriteHeaderIncludedPacket(r *stack.Route, payload buffer.Vector
 
 // HandlePacket is called by the link layer when new ipv6 packets arrive for
 // this endpoint.
-func (e *endpoint) HandlePacket(r *stack.Route, vv buffer.VectorisedView) {
-	headerView := vv.First()
+func (e *endpoint) HandlePacket(r *stack.Route, pb *buffer.PacketBuffer) {
+	headerView := pb.Data.First()
 	h := header.IPv6(headerView)
-	if !h.IsValid(vv.Size()) {
+	if !h.IsValid(pb.Data.Size()) {
 		return
 	}
 
-	vv.TrimFront(header.IPv6MinimumSize)
-	vv.CapLength(int(h.PayloadLength()))
+	pb.Data.TrimFront(header.IPv6MinimumSize)
+	pb.Data.CapLength(int(h.PayloadLength()))
 
 	p := h.TransportProtocol()
 	if p == header.ICMPv6ProtocolNumber {
-		e.handleICMP(r, headerView, vv)
+		e.handleICMP(r, headerView, pb)
 		return
 	}
 
 	r.Stats().IP.PacketsDelivered.Increment()
-	e.dispatcher.DeliverTransportPacket(r, p, headerView, vv)
+	e.dispatcher.DeliverTransportPacket(r, p, pb)
 }
 
 // Close cleans up resources associated with the endpoint.

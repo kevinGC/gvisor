@@ -50,7 +50,7 @@ type endpointsByNic struct {
 
 // HandlePacket is called by the stack when new packets arrive to this transport
 // endpoint.
-func (epsByNic *endpointsByNic) handlePacket(r *Route, id TransportEndpointID, vv buffer.VectorisedView) {
+func (epsByNic *endpointsByNic) handlePacket(r *Route, id TransportEndpointID, pb *buffer.PacketBuffer) {
 	epsByNic.mu.RLock()
 
 	mpep, ok := epsByNic.endpoints[r.ref.nic.ID()]
@@ -64,18 +64,18 @@ func (epsByNic *endpointsByNic) handlePacket(r *Route, id TransportEndpointID, v
 	// If this is a broadcast or multicast datagram, deliver the datagram to all
 	// endpoints bound to the right device.
 	if isMulticastOrBroadcast(id.LocalAddress) {
-		mpep.handlePacketAll(r, id, vv)
+		mpep.handlePacketAll(r, id, pb)
 		epsByNic.mu.RUnlock() // Don't use defer for performance reasons.
 		return
 	}
 
 	// multiPortEndpoints are guaranteed to have at least one element.
-	selectEndpoint(id, mpep, epsByNic.seed).HandlePacket(r, id, vv)
+	selectEndpoint(id, mpep, epsByNic.seed).HandlePacket(r, id, pb)
 	epsByNic.mu.RUnlock() // Don't use defer for performance reasons.
 }
 
 // HandleControlPacket implements stack.TransportEndpoint.HandleControlPacket.
-func (epsByNic *endpointsByNic) handleControlPacket(n *NIC, id TransportEndpointID, typ ControlType, extra uint32, vv buffer.VectorisedView) {
+func (epsByNic *endpointsByNic) handleControlPacket(n *NIC, id TransportEndpointID, typ ControlType, extra uint32, pb *buffer.PacketBuffer) {
 	epsByNic.mu.RLock()
 	defer epsByNic.mu.RUnlock()
 
@@ -91,7 +91,7 @@ func (epsByNic *endpointsByNic) handleControlPacket(n *NIC, id TransportEndpoint
 	// broadcast like we are doing with handlePacket above?
 
 	// multiPortEndpoints are guaranteed to have at least one element.
-	selectEndpoint(id, mpep, epsByNic.seed).HandleControlPacket(id, typ, extra, vv)
+	selectEndpoint(id, mpep, epsByNic.seed).HandleControlPacket(id, typ, extra, pb)
 }
 
 // registerEndpoint returns true if it succeeds. It fails and returns
@@ -224,18 +224,19 @@ func selectEndpoint(id TransportEndpointID, mpep *multiPortEndpoint, seed uint32
 	return mpep.endpointsArr[idx]
 }
 
-func (ep *multiPortEndpoint) handlePacketAll(r *Route, id TransportEndpointID, vv buffer.VectorisedView) {
+func (ep *multiPortEndpoint) handlePacketAll(r *Route, id TransportEndpointID, pb *buffer.PacketBuffer) {
 	ep.mu.RLock()
 	for i, endpoint := range ep.endpointsArr {
-		// HandlePacket modifies vv, so each endpoint needs its own copy except for
+		// HandlePacket modifies pb, so each endpoint needs its own copy except for
 		// the final one.
 		if i == len(ep.endpointsArr)-1 {
-			endpoint.HandlePacket(r, id, vv)
+			endpoint.HandlePacket(r, id, pb)
 			break
 		}
-		vvCopy := buffer.NewView(vv.Size())
-		copy(vvCopy, vv.ToView())
-		endpoint.HandlePacket(r, id, vvCopy.ToVectorisedView())
+		// vvCopy := buffer.NewView(vv.Size())
+		// copy(vvCopy, vv.ToView())
+		// endpoint.HandlePacket(r, id, vvCopy.ToVectorisedView())
+		endpoint.HandlePacket(r, id, pb.Clone())
 	}
 	ep.mu.RUnlock() // Don't use defer for performance reasons.
 }
@@ -345,8 +346,8 @@ func (d *transportDemuxer) deliverPacket(r *Route, protocol tcpip.TransportProto
 	// transport endpoints.
 	var destEps []*endpointsByNic
 	if protocol == header.UDPProtocolNumber && isMulticastOrBroadcast(id.LocalAddress) {
-		destEps = d.findAllEndpointsLocked(eps, pb, id)
-	} else if ep := d.findEndpointLocked(eps, pb, id); ep != nil {
+		destEps = d.findAllEndpointsLocked(eps, id)
+	} else if ep := d.findEndpointLocked(eps, id); ep != nil {
 		destEps = append(destEps, ep)
 	}
 
@@ -371,7 +372,7 @@ func (d *transportDemuxer) deliverPacket(r *Route, protocol tcpip.TransportProto
 
 // deliverRawPacket attempts to deliver the given packet and returns whether it
 // was delivered successfully.
-func (d *transportDemuxer) deliverRawPacket(r *Route, protocol tcpip.TransportProtocolNumber, pb *buffer.Packet) bool {
+func (d *transportDemuxer) deliverRawPacket(r *Route, protocol tcpip.TransportProtocolNumber, pb *buffer.PacketBuffer) bool {
 	eps, ok := d.protocol[protocolIDs{r.NetProto, protocol}]
 	if !ok {
 		return false
@@ -395,7 +396,7 @@ func (d *transportDemuxer) deliverRawPacket(r *Route, protocol tcpip.TransportPr
 
 // deliverControlPacket attempts to deliver the given control packet. Returns
 // true if it found an endpoint, false otherwise.
-func (d *transportDemuxer) deliverControlPacket(n *NIC, net tcpip.NetworkProtocolNumber, trans tcpip.TransportProtocolNumber, typ ControlType, extra uint32, vv buffer.VectorisedView, id TransportEndpointID) bool {
+func (d *transportDemuxer) deliverControlPacket(n *NIC, net tcpip.NetworkProtocolNumber, trans tcpip.TransportProtocolNumber, typ ControlType, extra uint32, pb *buffer.PacketBuffer, id TransportEndpointID) bool {
 	eps, ok := d.protocol[protocolIDs{net, trans}]
 	if !ok {
 		return false
@@ -403,7 +404,7 @@ func (d *transportDemuxer) deliverControlPacket(n *NIC, net tcpip.NetworkProtoco
 
 	// Try to find the endpoint.
 	eps.mu.RLock()
-	ep := d.findEndpointLocked(eps, vv, id)
+	ep := d.findEndpointLocked(eps, id)
 	eps.mu.RUnlock()
 
 	// Fail if we didn't find one.
@@ -412,12 +413,12 @@ func (d *transportDemuxer) deliverControlPacket(n *NIC, net tcpip.NetworkProtoco
 	}
 
 	// Deliver the packet.
-	ep.handleControlPacket(n, id, typ, extra, vv)
+	ep.handleControlPacket(n, id, typ, extra, pb)
 
 	return true
 }
 
-func (d *transportDemuxer) findAllEndpointsLocked(eps *transportEndpoints, vv buffer.VectorisedView, id TransportEndpointID) []*endpointsByNic {
+func (d *transportDemuxer) findAllEndpointsLocked(eps *transportEndpoints, id TransportEndpointID) []*endpointsByNic {
 	var matchedEPs []*endpointsByNic
 	// Try to find a match with the id as provided.
 	if ep, ok := eps.endpoints[id]; ok {
@@ -451,8 +452,8 @@ func (d *transportDemuxer) findAllEndpointsLocked(eps *transportEndpoints, vv bu
 
 // findEndpointLocked returns the endpoint that most closely matches the given
 // id.
-func (d *transportDemuxer) findEndpointLocked(eps *transportEndpoints, vv buffer.VectorisedView, id TransportEndpointID) *endpointsByNic {
-	if matchedEPs := d.findAllEndpointsLocked(eps, vv, id); len(matchedEPs) > 0 {
+func (d *transportDemuxer) findEndpointLocked(eps *transportEndpoints, id TransportEndpointID) *endpointsByNic {
+	if matchedEPs := d.findAllEndpointsLocked(eps, id); len(matchedEPs) > 0 {
 		return matchedEPs[0]
 	}
 	return nil

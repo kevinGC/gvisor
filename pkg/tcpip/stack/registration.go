@@ -59,6 +59,7 @@ const (
 
 // TransportEndpoint is the interface that needs to be implemented by transport
 // protocol (e.g., tcp, udp) endpoints that can handle packets.
+// TODO: These are responsible for setting pb.TransportHeader.
 type TransportEndpoint interface {
 	// HandlePacket is called by the stack when new packets arrive to
 	// this transport endpoint.
@@ -73,6 +74,7 @@ type TransportEndpoint interface {
 // transport protocol endpoints. RawTransportEndpoints receive the entire
 // packet - including the network and transport headers - as delivered to
 // netstack.
+// TODO: These are responsible for setting headers.
 type RawTransportEndpoint interface {
 	// HandlePacket is called by the stack when new packets arrive to
 	// this transport endpoint. The packet contains all data from the link
@@ -84,6 +86,7 @@ type RawTransportEndpoint interface {
 // transport protocol endpoints. These endpoints receive link layer headers in
 // addition to whatever they contain (usually network and transport layer
 // headers and a payload).
+// TODO: These are responsible for setting headers.
 type PacketEndpoint interface {
 	// HandlePacket is called by the stack when new packets arrive that
 	// match the endpoint.
@@ -93,7 +96,7 @@ type PacketEndpoint interface {
 	//
 	// linkHeader may have a length of 0, in which case the PacketEndpoint
 	// should construct its own ethernet header for applications.
-	HandlePacket(nicid tcpip.NICID, addr tcpip.LinkAddress, netProto tcpip.NetworkProtocolNumber, pb *buffer.PackeBuffer)
+	HandlePacket(nicid tcpip.NICID, addr tcpip.LinkAddress, netProto tcpip.NetworkProtocolNumber, pb *buffer.PacketBuffer)
 }
 
 // TransportProtocol is the interface that needs to be implemented by transport
@@ -123,7 +126,7 @@ type TransportProtocol interface {
 	//
 	// The return value indicates whether the packet was well-formed (for
 	// stats purposes only).
-	HandleUnknownDestinationPacket(r *Route, id TransportEndpointID, netHeader buffer.View, vv buffer.VectorisedView) bool
+	HandleUnknownDestinationPacket(r *Route, id TransportEndpointID, pb *buffer.PacketBuffer) bool
 
 	// SetOption allows enabling/disabling protocol specific features.
 	// SetOption returns an error if the option is not supported or the
@@ -219,7 +222,8 @@ type NetworkEndpoint interface {
 
 	// HandlePacket is called by the link layer when new packets arrive to
 	// this network endpoint.
-	HandlePacket(r *Route, pb *buffer.Packet)
+	// TODO: THis is responsible for settings pb.NetworkHeaders.
+	HandlePacket(r *Route, pb *buffer.PacketBuffer)
 
 	// Close is called when the endpoint is reomved from a stack.
 	Close()
@@ -292,6 +296,7 @@ const (
 // LinkEndpoint is the interface implemented by data link layer protocols (e.g.,
 // ethernet, loopback, raw) and used by network layer protocols to send packets
 // out through the implementer's data link endpoint.
+// TODO: This is responsible for settings pb.LinkHeader.
 type LinkEndpoint interface {
 	// MTU is the maximum transmission unit for this endpoint. This is
 	// usually dictated by the backing physical network; when such a
@@ -349,7 +354,7 @@ type InjectableLinkEndpoint interface {
 	LinkEndpoint
 
 	// InjectInbound injects an inbound packet.
-	InjectInbound(protocol tcpip.NetworkProtocolNumber, vv buffer.VectorisedView)
+	InjectInbound(protocol tcpip.NetworkProtocolNumber, pb *buffer.PacketBuffer)
 
 	// InjectOutbound writes a fully formed outbound packet directly to the
 	// link.
