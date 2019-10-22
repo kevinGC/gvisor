@@ -140,7 +140,7 @@ func (d *readVDispatcher) dispatch() (bool, *tcpip.Error) {
 
 	used := d.capViews(n, BufConfig)
 	vv := buffer.NewVectorisedView(n, d.views[:used])
-	// vv.TrimFront(d.e.hdrSize)
+	vv.TrimFront(d.e.hdrSize)
 	pb := buffer.PacketBuffer{
 		Data:       vv,
 		LinkHeader: buffer.View(eth),

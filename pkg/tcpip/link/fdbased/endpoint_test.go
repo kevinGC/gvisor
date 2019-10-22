@@ -19,6 +19,7 @@ package fdbased
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"math/rand"
 	"reflect"
 	"syscall"
@@ -45,7 +46,7 @@ const (
 type packetInfo struct {
 	raddr    tcpip.LinkAddress
 	proto    tcpip.NetworkProtocolNumber
-	contents *buffer.PacketBuffer
+	contents buffer.PacketBuffer
 }
 
 type context struct {
@@ -93,7 +94,8 @@ func (c *context) cleanup() {
 }
 
 func (c *context) DeliverNetworkPacket(linkEP stack.LinkEndpoint, remote tcpip.LinkAddress, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pb *buffer.PacketBuffer) {
-	c.ch <- packetInfo{remote, protocol, pb}
+	log.Printf("*pb: %+v", *pb)
+	c.ch <- packetInfo{remote, protocol, *pb.Clone()}
 }
 
 func TestNoEthernetProperties(t *testing.T) {
@@ -318,7 +320,7 @@ func TestDeliverPacket(t *testing.T) {
 					want := packetInfo{
 						raddr: raddr,
 						proto: proto,
-						contents: &buffer.PacketBuffer{
+						contents: buffer.PacketBuffer{
 							Data:       buffer.View(b).ToVectorisedView(),
 							LinkHeader: buffer.View(hdr),
 						},
@@ -334,6 +336,7 @@ func TestDeliverPacket(t *testing.T) {
 					t.Fatalf("Timed out waiting for packet")
 				}
 			})
+			return
 		}
 	}
 }
