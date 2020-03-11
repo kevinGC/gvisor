@@ -582,6 +582,9 @@ type endpoint struct {
 	// endpoint and at this point the endpoint is only around
 	// to complete the TCP shutdown.
 	closed bool
+
+	uid uint32
+	gid uint32
 }
 
 // UniqueID implements stack.TransportEndpoint.UniqueID.
@@ -1117,6 +1120,11 @@ func (e *endpoint) ModerateRecvBuf(copied int) {
 	e.rcvAutoParams.measureTime = now
 	e.rcvAutoParams.copied = 0
 	e.rcvListMu.Unlock()
+}
+
+func (e *endpoint) SetOwner(uid uint32, gid uint32) {
+	e.uid = uid
+	e.gid = gid
 }
 
 // IPTables implements tcpip.Endpoint.IPTables.

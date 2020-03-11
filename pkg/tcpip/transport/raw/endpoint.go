@@ -81,6 +81,9 @@ type endpoint struct {
 	// Connect(), and is valid only when conneted is true.
 	route stack.Route                  `state:"manual"`
 	stats tcpip.TransportEndpointStats `state:"nosave"`
+
+	uid uint32
+	gid uint32
 }
 
 // NewEndpoint returns a raw  endpoint for the given protocols.
@@ -159,6 +162,11 @@ func (e *endpoint) Close() {
 
 // ModerateRecvBuf implements tcpip.Endpoint.ModerateRecvBuf.
 func (e *endpoint) ModerateRecvBuf(copied int) {}
+
+func (e *endpoint) SetOwner(uid uint32, gid uint32) {
+	e.uid = uid
+	e.gid = gid
+}
 
 // IPTables implements tcpip.Endpoint.IPTables.
 func (e *endpoint) IPTables() (iptables.IPTables, error) {
@@ -349,10 +357,17 @@ func (e *endpoint) finishWrite(payloadBytes []byte, route *stack.Route) (int64, 
 			}
 			break
 		}
+
+		owner := tcpip.PacketOwner{
+			UID: e.uid,
+			GID: e.gid,
+		}
+
 		hdr := buffer.NewPrependable(len(payloadBytes) + int(route.MaxHeaderLength()))
 		if err := route.WritePacket(nil /* gso */, stack.NetworkHeaderParams{Protocol: e.TransProto, TTL: route.DefaultTTL(), TOS: stack.DefaultTOS}, tcpip.PacketBuffer{
 			Header: hdr,
 			Data:   buffer.View(payloadBytes).ToVectorisedView(),
+			Owner:  &owner,
 		}); err != nil {
 			return 0, nil, err
 		}

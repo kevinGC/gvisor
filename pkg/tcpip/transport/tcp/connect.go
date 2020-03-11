@@ -697,7 +697,11 @@ func (e *endpoint) sendSynTCP(r *stack.Route, id stack.TransportEndpointID, ttl,
 }
 
 func (e *endpoint) sendTCP(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO) *tcpip.Error {
-	if err := sendTCP(r, id, data, ttl, tos, flags, seq, ack, rcvWnd, opts, gso); err != nil {
+	owner := tcpip.PacketOwner{
+		UID: e.uid,
+		GID: e.gid,
+	}
+	if err := sendTCP(r, id, data, ttl, tos, flags, seq, ack, rcvWnd, opts, gso, &owner); err != nil {
 		e.stats.SendErrors.SegmentSendToNetworkFailed.Increment()
 		return err
 	}
@@ -740,7 +744,7 @@ func buildTCPHdr(r *stack.Route, id stack.TransportEndpointID, pkt *tcpip.Packet
 
 }
 
-func sendTCPBatch(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO) *tcpip.Error {
+func sendTCPBatch(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO, owner *tcpip.PacketOwner) *tcpip.Error {
 	optLen := len(opts)
 	if rcvWnd > 0xffff {
 		rcvWnd = 0xffff
@@ -768,6 +772,7 @@ func sendTCPBatch(r *stack.Route, id stack.TransportEndpointID, data buffer.Vect
 		pkts[i].DataOffset = off
 		pkts[i].DataSize = packetSize
 		pkts[i].Data = data
+		pkts[i].Owner = owner
 		buildTCPHdr(r, id, &pkts[i], flags, seq, ack, rcvWnd, opts, gso)
 		off += packetSize
 		seq = seq.Add(seqnum.Size(packetSize))
@@ -785,14 +790,14 @@ func sendTCPBatch(r *stack.Route, id stack.TransportEndpointID, data buffer.Vect
 
 // sendTCP sends a TCP segment with the provided options via the provided
 // network endpoint and under the provided identity.
-func sendTCP(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO) *tcpip.Error {
+func sendTCP(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO, owner *tcpip.PacketOwner) *tcpip.Error {
 	optLen := len(opts)
 	if rcvWnd > 0xffff {
 		rcvWnd = 0xffff
 	}
 
 	if r.Loop&stack.PacketLoop == 0 && gso != nil && gso.Type == stack.GSOSW && int(gso.MSS) < data.Size() {
-		return sendTCPBatch(r, id, data, ttl, tos, flags, seq, ack, rcvWnd, opts, gso)
+		return sendTCPBatch(r, id, data, ttl, tos, flags, seq, ack, rcvWnd, opts, gso, owner)
 	}
 
 	pkt := tcpip.PacketBuffer{
@@ -800,6 +805,7 @@ func sendTCP(r *stack.Route, id stack.TransportEndpointID, data buffer.Vectorise
 		DataOffset: 0,
 		DataSize:   data.Size(),
 		Data:       data,
+		Owner:      owner,
 	}
 	buildTCPHdr(r, id, &pkt, flags, seq, ack, rcvWnd, opts, gso)
 

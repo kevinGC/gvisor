@@ -74,6 +74,9 @@ type endpoint struct {
 	route         stack.Route `state:"manual"`
 	ttl           uint8
 	stats         tcpip.TransportEndpointStats `state:"nosave"`
+
+	uid uint32
+	gid uint32
 }
 
 func newEndpoint(s *stack.Stack, netProto tcpip.NetworkProtocolNumber, transProto tcpip.TransportProtocolNumber, waiterQueue *waiter.Queue) (tcpip.Endpoint, *tcpip.Error) {
@@ -133,6 +136,11 @@ func (e *endpoint) Close() {
 
 // ModerateRecvBuf implements tcpip.Endpoint.ModerateRecvBuf.
 func (e *endpoint) ModerateRecvBuf(copied int) {}
+
+func (e *endpoint) SetOwner(uid uint32, gid uint32) {
+	e.uid = uid
+	e.gid = gid
+}
 
 // IPTables implements tcpip.Endpoint.IPTables.
 func (e *endpoint) IPTables() (iptables.IPTables, error) {
@@ -322,7 +330,11 @@ func (e *endpoint) write(p tcpip.Payloader, opts tcpip.WriteOptions) (int64, <-c
 
 	switch e.NetProto {
 	case header.IPv4ProtocolNumber:
-		err = send4(route, e.ID.LocalPort, v, e.ttl)
+		owner := tcpip.PacketOwner{
+			UID: e.uid,
+			GID: e.gid,
+		}
+		err = send4(route, e.ID.LocalPort, v, e.ttl, &owner)
 
 	case header.IPv6ProtocolNumber:
 		err = send6(route, e.ID.LocalPort, v, e.ttl)
@@ -416,7 +428,7 @@ func (e *endpoint) GetSockOpt(opt interface{}) *tcpip.Error {
 	}
 }
 
-func send4(r *stack.Route, ident uint16, data buffer.View, ttl uint8) *tcpip.Error {
+func send4(r *stack.Route, ident uint16, data buffer.View, ttl uint8, owner *tcpip.PacketOwner) *tcpip.Error {
 	if len(data) < header.ICMPv4MinimumSize {
 		return tcpip.ErrInvalidEndpointState
 	}
@@ -445,6 +457,7 @@ func send4(r *stack.Route, ident uint16, data buffer.View, ttl uint8) *tcpip.Err
 		Header:          hdr,
 		Data:            data.ToVectorisedView(),
 		TransportHeader: buffer.View(icmpv4),
+		Owner:           owner,
 	})
 }
 

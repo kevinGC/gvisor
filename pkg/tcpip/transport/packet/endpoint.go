@@ -393,3 +393,5 @@ func (ep *endpoint) Info() tcpip.EndpointInfo {
 func (ep *endpoint) Stats() tcpip.EndpointStats {
 	return &ep.stats
 }
+
+func (ep *endpoint) SetOwner(uid uint32, gid uint32) {}
