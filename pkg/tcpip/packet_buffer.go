@@ -15,6 +15,11 @@ package tcpip
 
 import "gvisor.dev/gvisor/pkg/tcpip/buffer"
 
+type PacketOwner struct {
+	UID uint32
+	GID uint32
+}
+
 // A PacketBuffer contains all the data of a network packet.
 //
 // As a PacketBuffer traverses up the stack, it may be necessary to pass it to
@@ -55,6 +60,10 @@ type PacketBuffer struct {
 	LinkHeader      buffer.View
 	NetworkHeader   buffer.View
 	TransportHeader buffer.View
+
+	// Owner stores the uid and gid of the process which owns the packet.
+	// Only set for locally generated packets.
+	Owner *PacketOwner
 }
 
 // Clone makes a copy of pk. It clones the Data field, which creates a new

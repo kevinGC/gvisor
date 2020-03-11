@@ -131,7 +131,16 @@ func (p *provider) Socket(t *kernel.Task, stype linux.SockType, protocol int) (*
 		return nil, syserr.TranslateNetstackError(e)
 	}
 
-	return New(t, p.family, stype, int(transProto), wq, ep)
+	fs, err := New(t, p.family, stype, int(transProto), wq, ep)
+
+	// Set UID and GID in the endpoint.
+	// TODO(gvisor.dev/issue/170): Set the Task in endpoint instead of UID
+	// and GID to fix the issue when process owner changes for the socket.
+	attr, er := fs.Dirent.Inode.UnstableAttr(t)
+	if er == nil {
+		ep.SetOwner(uint32(attr.Owner.UID), uint32(attr.Owner.GID))
+	}
+	return fs, err
 }
 
 func packetSocket(t *kernel.Task, epStack *Stack, stype linux.SockType, protocol int) (*fs.File, *syserr.Error) {
