@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"gvisor.dev/gvisor/pkg/rand"
+	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sleep"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -276,7 +277,7 @@ func (l *listenContext) createConnectingEndpoint(s *segment, iss seqnum.Value, i
 // and then performs the TCP 3-way handshake.
 //
 // The new endpoint is returned with e.mu held.
-func (l *listenContext) createEndpointAndPerformHandshake(s *segment, opts *header.TCPSynOptions, queue *waiter.Queue) (*endpoint, *tcpip.Error) {
+func (l *listenContext) createEndpointAndPerformHandshake(s *segment, opts *header.TCPSynOptions, queue *waiter.Queue, t *kernel.Task) (*endpoint, *tcpip.Error) {
 	// Create new endpoint.
 	irs := s.sequenceNumber
 	isn := generateSecureISN(s.id, l.stack.Seed())
@@ -284,6 +285,7 @@ func (l *listenContext) createEndpointAndPerformHandshake(s *segment, opts *head
 	if err != nil {
 		return nil, err
 	}
+	ep.task = t
 
 	// listenEP is nil when listenContext is used by tcp.Forwarder.
 	deferAccept := time.Duration(0)
@@ -406,7 +408,7 @@ func (e *endpoint) handleSynSegment(ctx *listenContext, s *segment, opts *header
 	}()
 	defer s.decRef()
 
-	n, err := ctx.createEndpointAndPerformHandshake(s, opts, &waiter.Queue{})
+	n, err := ctx.createEndpointAndPerformHandshake(s, opts, &waiter.Queue{}, e.task)
 	if err != nil {
 		e.stack.Stats().TCP.FailedConnectionAttempts.Increment()
 		e.stats.FailedConnectionAttempts.Increment()
