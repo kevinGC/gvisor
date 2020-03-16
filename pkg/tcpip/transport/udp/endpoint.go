@@ -15,6 +15,7 @@
 package udp
 
 import (
+	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -145,8 +146,8 @@ type endpoint struct {
 	// TODO(b/142022063): Add ability to save and restore per endpoint stats.
 	stats tcpip.TransportEndpointStats `state:"nosave"`
 
-	uid uint32
-	gid uint32
+	// task is the context to get uid and gid of the packet.
+	task *kernel.Task
 }
 
 // +stateify savable
@@ -235,11 +236,6 @@ func (e *endpoint) Close() {
 
 // ModerateRecvBuf implements tcpip.Endpoint.ModerateRecvBuf.
 func (e *endpoint) ModerateRecvBuf(copied int) {}
-
-func (e *endpoint) SetOwner(uid uint32, gid uint32) {
-	e.uid = uid
-	e.gid = gid
-}
 
 // IPTables implements tcpip.Endpoint.IPTables.
 func (e *endpoint) IPTables() (iptables.IPTables, error) {
@@ -493,10 +489,12 @@ func (e *endpoint) write(p tcpip.Payloader, opts tcpip.WriteOptions) (int64, <-c
 		useDefaultTTL = false
 	}
 
-	owner := tcpip.PacketOwner{
-		UID: e.uid,
-		GID: e.gid,
+	var owner tcpip.PacketOwner
+	if e.task != nil {
+		owner.UID = uint32(e.task.Credentials().EffectiveKUID)
+		owner.GID = uint32(e.task.Credentials().EffectiveKGID)
 	}
+
 	if err := sendUDP(route, buffer.View(v).ToVectorisedView(), e.ID.LocalPort, dstPort, ttl, useDefaultTTL, e.sendTOS, &owner); err != nil {
 		return 0, nil, err
 	}
@@ -1367,4 +1365,8 @@ func (*endpoint) Wait() {}
 
 func isBroadcastOrMulticast(a tcpip.Address) bool {
 	return a == header.IPv4Broadcast || header.IsV4MulticastAddress(a) || header.IsV6MulticastAddress(a)
+}
+
+func (e *endpoint) SetKernelTask(t *kernel.Task) {
+	e.task = t
 }

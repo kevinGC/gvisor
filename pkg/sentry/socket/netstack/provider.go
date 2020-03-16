@@ -91,6 +91,10 @@ func getTransportProtocol(ctx context.Context, stype linux.SockType, protocol in
 	return 0, true, syserr.ErrProtocolNotSupported
 }
 
+type EndpointKernel interface {
+	SetKernelTask(t *kernel.Task)
+}
+
 // Socket creates a new socket object for the AF_INET, AF_INET6, or AF_PACKET
 // family.
 func (p *provider) Socket(t *kernel.Task, stype linux.SockType, protocol int) (*fs.File, *syserr.Error) {
@@ -131,16 +135,11 @@ func (p *provider) Socket(t *kernel.Task, stype linux.SockType, protocol int) (*
 		return nil, syserr.TranslateNetstackError(e)
 	}
 
-	fs, err := New(t, p.family, stype, int(transProto), wq, ep)
+	var epT EndpointKernel
+	epT, _ = ep.(EndpointKernel)
+	epT.SetKernelTask(t)
 
-	// Set UID and GID in the endpoint.
-	// TODO(gvisor.dev/issue/170): Set the Task in endpoint instead of UID
-	// and GID to fix the issue when process owner changes for the socket.
-	attr, er := fs.Dirent.Inode.UnstableAttr(t)
-	if er == nil {
-		ep.SetOwner(uint32(attr.Owner.UID), uint32(attr.Owner.GID))
-	}
-	return fs, err
+	return New(t, p.family, stype, int(transProto), wq, ep)
 }
 
 func packetSocket(t *kernel.Task, epStack *Stack, stype linux.SockType, protocol int) (*fs.File, *syserr.Error) {

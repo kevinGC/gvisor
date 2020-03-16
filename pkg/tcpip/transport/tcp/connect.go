@@ -694,10 +694,12 @@ func (e *endpoint) sendSynTCP(r *stack.Route, id stack.TransportEndpointID, ttl,
 }
 
 func (e *endpoint) sendTCP(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO) *tcpip.Error {
-	owner := tcpip.PacketOwner{
-		UID: e.uid,
-		GID: e.gid,
+	var owner tcpip.PacketOwner
+	if e.task != nil {
+		owner.UID = uint32(e.task.Credentials().EffectiveKUID)
+		owner.GID = uint32(e.task.Credentials().EffectiveKGID)
 	}
+
 	if err := sendTCP(r, id, data, ttl, tos, flags, seq, ack, rcvWnd, opts, gso, &owner); err != nil {
 		e.stats.SendErrors.SegmentSendToNetworkFailed.Increment()
 		return err

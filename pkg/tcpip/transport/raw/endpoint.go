@@ -26,6 +26,7 @@
 package raw
 
 import (
+	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -82,8 +83,8 @@ type endpoint struct {
 	route stack.Route                  `state:"manual"`
 	stats tcpip.TransportEndpointStats `state:"nosave"`
 
-	uid uint32
-	gid uint32
+	// task is the context to get uid and gid of the packet.
+	task *kernel.Task
 }
 
 // NewEndpoint returns a raw  endpoint for the given protocols.
@@ -163,9 +164,8 @@ func (e *endpoint) Close() {
 // ModerateRecvBuf implements tcpip.Endpoint.ModerateRecvBuf.
 func (e *endpoint) ModerateRecvBuf(copied int) {}
 
-func (e *endpoint) SetOwner(uid uint32, gid uint32) {
-	e.uid = uid
-	e.gid = gid
+func (e *endpoint) SetKernelTask(t *kernel.Task) {
+	e.task = t
 }
 
 // IPTables implements tcpip.Endpoint.IPTables.
@@ -358,9 +358,10 @@ func (e *endpoint) finishWrite(payloadBytes []byte, route *stack.Route) (int64, 
 			break
 		}
 
-		owner := tcpip.PacketOwner{
-			UID: e.uid,
-			GID: e.gid,
+		var owner tcpip.PacketOwner
+		if e.task != nil {
+			owner.UID = uint32(e.task.Credentials().EffectiveKUID)
+			owner.GID = uint32(e.task.Credentials().EffectiveKGID)
 		}
 
 		hdr := buffer.NewPrependable(len(payloadBytes) + int(route.MaxHeaderLength()))

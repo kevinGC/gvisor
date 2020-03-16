@@ -470,9 +470,6 @@ type Endpoint interface {
 
 	// Stats returns a reference to the endpoint stats.
 	Stats() EndpointStats
-
-	// Set uid and gid for the endpoint.
-	SetOwner(uid uint32, gid uint32)
 }
 
 // EndpointInfo is the interface implemented by each endpoint info struct.
