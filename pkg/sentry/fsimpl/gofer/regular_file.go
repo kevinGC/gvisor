@@ -126,6 +126,11 @@ func (fd *regularFileFD) PWrite(ctx context.Context, src usermem.IOSequence, off
 	if opts.Flags != 0 {
 		return 0, syserror.EOPNOTSUPP
 	}
+	limit, err := vfs.CheckLimit(ctx, offset, src.NumBytes())
+	if err != nil {
+		return 0, err
+	}
+	src = src.TakeFirst64(limit)
 
 	d := fd.dentry()
 	d.metadataMu.Lock()
@@ -361,8 +366,15 @@ func (rw *dentryReadWriter) WriteFromBlocks(srcs safemem.BlockSeq) (uint64, erro
 	rw.d.handleMu.RLock()
 	if (rw.d.handle.fd >= 0 && !rw.d.fs.opts.forcePageCache) || rw.d.fs.opts.interop == InteropModeShared || rw.direct {
 		n, err := rw.d.handle.writeFromBlocksAt(rw.ctx, srcs, rw.off)
-		rw.d.handleMu.RUnlock()
 		rw.off += n
+		rw.d.dataMu.Lock()
+		if rw.off > rw.d.size {
+			atomic.StoreUint64(&rw.d.size, rw.off)
+			// The remote file's size will implicitly be extended to the correct
+			// value when we write back to it.
+		}
+		rw.d.dataMu.Unlock()
+		rw.d.handleMu.RUnlock()
 		return n, err
 	}
 

@@ -126,17 +126,23 @@ func (vfs *VirtualFilesystem) Init() error {
 	// Construct vfs.anonMount.
 	anonfsDevMinor, err := vfs.GetAnonBlockDevMinor()
 	if err != nil {
-		return err
+		// This shouldn't be possible since anonBlockDevMinorNext was
+		// initialized to 1 above (no device numbers have been allocated yet).
+		panic(fmt.Sprintf("VirtualFilesystem.Init: device number allocation for anonfs failed: %v", err))
 	}
 	anonfs := anonFilesystem{
 		devMinor: anonfsDevMinor,
 	}
 	anonfs.vfsfs.Init(vfs, &anonfs)
-	vfs.anonMount = &Mount{
-		vfs:  vfs,
-		fs:   &anonfs.vfsfs,
-		refs: 1,
+	defer anonfs.vfsfs.DecRef()
+	anonMount, err := vfs.NewDisconnectedMount(&anonfs.vfsfs, nil, &MountOptions{})
+	if err != nil {
+		// We should not be passing any MountOptions that would cause
+		// construction of this mount to fail.
+		panic(fmt.Sprintf("VirtualFilesystem.Init: anonfs mount failed: %v", err))
 	}
+	vfs.anonMount = anonMount
+
 	return nil
 }
 
@@ -166,6 +172,23 @@ type PathOperation struct {
 	// path component represents a symbolic link, the symbolic link should be
 	// followed.
 	FollowFinalSymlink bool
+}
+
+// AccessAt checks whether a user with creds has access to the file at
+// the given path.
+func (vfs *VirtualFilesystem) AccessAt(ctx context.Context, creds *auth.Credentials, ats AccessTypes, pop *PathOperation) error {
+	rp := vfs.getResolvingPath(creds, pop)
+	for {
+		err := rp.mount.fs.impl.AccessAt(ctx, rp, creds, ats)
+		if err == nil {
+			vfs.putResolvingPath(rp)
+			return nil
+		}
+		if !rp.handleError(err) {
+			vfs.putResolvingPath(rp)
+			return err
+		}
+	}
 }
 
 // GetDentryAt returns a VirtualDentry representing the given path, at which a
@@ -382,6 +405,11 @@ func (vfs *VirtualFilesystem) OpenAt(ctx context.Context, creds *auth.Credential
 			// TODO(gvisor.dev/issue/1193): Move inside fsimpl to avoid another call
 			// to FileDescription.Stat().
 			if opts.FileExec {
+				if fd.Mount().flags.NoExec {
+					fd.DecRef()
+					return nil, syserror.EACCES
+				}
+
 				// Only a regular file can be executed.
 				stat, err := fd.Stat(ctx, StatOptions{Mask: linux.STATX_TYPE})
 				if err != nil {

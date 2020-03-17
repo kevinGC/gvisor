@@ -61,9 +61,10 @@ func (f *DynamicBytesFile) Open(rp *vfs.ResolvingPath, vfsd *vfs.Dentry, opts vf
 	return &fd.vfsfd, nil
 }
 
-// SetStat implements Inode.SetStat.
-func (f *DynamicBytesFile) SetStat(*vfs.Filesystem, vfs.SetStatOptions) error {
-	// DynamicBytesFiles are immutable.
+// SetStat implements Inode.SetStat. By default DynamicBytesFile doesn't allow
+// inode attributes to be changed. Override SetStat() making it call
+// f.InodeAttrs to allow it.
+func (*DynamicBytesFile) SetStat(context.Context, *vfs.Filesystem, *auth.Credentials, vfs.SetStatOptions) error {
 	return syserror.EPERM
 }
 
@@ -122,7 +123,7 @@ func (fd *DynamicBytesFD) Release() {}
 // Stat implements vfs.FileDescriptionImpl.Stat.
 func (fd *DynamicBytesFD) Stat(ctx context.Context, opts vfs.StatOptions) (linux.Statx, error) {
 	fs := fd.vfsfd.VirtualDentry().Mount().Filesystem()
-	return fd.inode.Stat(fs), nil
+	return fd.inode.Stat(fs, opts)
 }
 
 // SetStat implements vfs.FileDescriptionImpl.SetStat.

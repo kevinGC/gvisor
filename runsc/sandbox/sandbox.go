@@ -369,6 +369,24 @@ func (s *Sandbox) createSandboxProcess(conf *boot.Config, args *Args, startSyncF
 		cmd.Args = append(cmd.Args, "--debug-log-fd="+strconv.Itoa(nextFD))
 		nextFD++
 	}
+	if conf.PanicLog != "" {
+		test := ""
+		if len(conf.TestOnlyTestNameEnv) != 0 {
+			// Fetch test name if one is provided and the test only flag was set.
+			if t, ok := specutils.EnvVar(args.Spec.Process.Env, conf.TestOnlyTestNameEnv); ok {
+				test = t
+			}
+		}
+
+		panicLogFile, err := specutils.DebugLogFile(conf.PanicLog, "panic", test)
+		if err != nil {
+			return fmt.Errorf("opening debug log file in %q: %v", conf.PanicLog, err)
+		}
+		defer panicLogFile.Close()
+		cmd.ExtraFiles = append(cmd.ExtraFiles, panicLogFile)
+		cmd.Args = append(cmd.Args, "--panic-log-fd="+strconv.Itoa(nextFD))
+		nextFD++
+	}
 
 	cmd.Args = append(cmd.Args, "--panic-signal="+strconv.Itoa(int(syscall.SIGTERM)))
 
@@ -424,6 +442,12 @@ func (s *Sandbox) createSandboxProcess(conf *boot.Config, args *Args, startSyncF
 		cmd.ExtraFiles = append(cmd.ExtraFiles, deviceFile)
 		cmd.Args = append(cmd.Args, "--device-fd="+strconv.Itoa(nextFD))
 		nextFD++
+	}
+
+	// TODO(b/151157106): syscall tests fail by timeout if asyncpreemptoff
+	// isn't set.
+	if conf.Platform == "kvm" {
+		cmd.Env = append(cmd.Env, "GODEBUG=asyncpreemptoff=1")
 	}
 
 	// The current process' stdio must be passed to the application via the
@@ -677,17 +701,19 @@ func (s *Sandbox) createSandboxProcess(conf *boot.Config, args *Args, startSyncF
 		nextFD++
 	}
 
+	if args.Attached {
+		// Kill sandbox if parent process exits in attached mode.
+		cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
+		// Tells boot that any process it creates must have pdeathsig set.
+		cmd.Args = append(cmd.Args, "--attached")
+	}
+
 	// Add container as the last argument.
 	cmd.Args = append(cmd.Args, s.ID)
 
 	// Log the FDs we are donating to the sandbox process.
 	for i, f := range cmd.ExtraFiles {
 		log.Debugf("Donating FD %d: %q", i+3, f.Name())
-	}
-
-	if args.Attached {
-		// Kill sandbox if parent process exits in attached mode.
-		cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 	}
 
 	log.Debugf("Starting sandbox: %s %v", binPath, cmd.Args)
@@ -968,6 +994,66 @@ func (s *Sandbox) StopCPUProfile() error {
 
 	if err := conn.Call(boot.StopCPUProfile, nil, nil); err != nil {
 		return fmt.Errorf("stopping sandbox %q CPU profile: %v", s.ID, err)
+	}
+	return nil
+}
+
+// GoroutineProfile writes a goroutine profile to the given file.
+func (s *Sandbox) GoroutineProfile(f *os.File) error {
+	log.Debugf("Goroutine profile %q", s.ID)
+	conn, err := s.sandboxConnect()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	opts := control.ProfileOpts{
+		FilePayload: urpc.FilePayload{
+			Files: []*os.File{f},
+		},
+	}
+	if err := conn.Call(boot.GoroutineProfile, &opts, nil); err != nil {
+		return fmt.Errorf("getting sandbox %q goroutine profile: %v", s.ID, err)
+	}
+	return nil
+}
+
+// BlockProfile writes a block profile to the given file.
+func (s *Sandbox) BlockProfile(f *os.File) error {
+	log.Debugf("Block profile %q", s.ID)
+	conn, err := s.sandboxConnect()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	opts := control.ProfileOpts{
+		FilePayload: urpc.FilePayload{
+			Files: []*os.File{f},
+		},
+	}
+	if err := conn.Call(boot.BlockProfile, &opts, nil); err != nil {
+		return fmt.Errorf("getting sandbox %q block profile: %v", s.ID, err)
+	}
+	return nil
+}
+
+// MutexProfile writes a mutex profile to the given file.
+func (s *Sandbox) MutexProfile(f *os.File) error {
+	log.Debugf("Mutex profile %q", s.ID)
+	conn, err := s.sandboxConnect()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	opts := control.ProfileOpts{
+		FilePayload: urpc.FilePayload{
+			Files: []*os.File{f},
+		},
+	}
+	if err := conn.Call(boot.MutexProfile, &opts, nil); err != nil {
+		return fmt.Errorf("getting sandbox %q mutex profile: %v", s.ID, err)
 	}
 	return nil
 }

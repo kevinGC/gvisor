@@ -113,29 +113,6 @@ func fstatat(t *kernel.Task, dirfd int32, pathAddr, statAddr usermem.Addr, flags
 	return stat.CopyOut(t, statAddr)
 }
 
-// This takes both input and output as pointer arguments to avoid copying large
-// structs.
-func convertStatxToUserStat(t *kernel.Task, statx *linux.Statx, stat *linux.Stat) {
-	// Linux just copies fields from struct kstat without regard to struct
-	// kstat::result_mask (fs/stat.c:cp_new_stat()), so we do too.
-	userns := t.UserNamespace()
-	*stat = linux.Stat{
-		Dev:     uint64(linux.MakeDeviceID(uint16(statx.DevMajor), statx.DevMinor)),
-		Ino:     statx.Ino,
-		Nlink:   uint64(statx.Nlink),
-		Mode:    uint32(statx.Mode),
-		UID:     uint32(auth.KUID(statx.UID).In(userns).OrOverflow()),
-		GID:     uint32(auth.KGID(statx.GID).In(userns).OrOverflow()),
-		Rdev:    uint64(linux.MakeDeviceID(uint16(statx.RdevMajor), statx.RdevMinor)),
-		Size:    int64(statx.Size),
-		Blksize: int64(statx.Blksize),
-		Blocks:  int64(statx.Blocks),
-		ATime:   timespecFromStatxTimestamp(statx.Atime),
-		MTime:   timespecFromStatxTimestamp(statx.Mtime),
-		CTime:   timespecFromStatxTimestamp(statx.Ctime),
-	}
-}
-
 func timespecFromStatxTimestamp(sxts linux.StatxTimestamp) linux.Timespec {
 	return linux.Timespec{
 		Sec:  sxts.Sec,
@@ -173,7 +150,11 @@ func Statx(t *kernel.Task, args arch.SyscallArguments) (uintptr, *kernel.Syscall
 	mask := args[3].Uint()
 	statxAddr := args[4].Pointer()
 
-	if flags&^(linux.AT_EMPTY_PATH|linux.AT_SYMLINK_NOFOLLOW) != 0 {
+	if flags&^(linux.AT_EMPTY_PATH|linux.AT_SYMLINK_NOFOLLOW|linux.AT_STATX_SYNC_TYPE) != 0 {
+		return 0, nil, syserror.EINVAL
+	}
+
+	if mask&linux.STATX__RESERVED != 0 {
 		return 0, nil, syserror.EINVAL
 	}
 
@@ -251,14 +232,64 @@ func Readlink(t *kernel.Task, args arch.SyscallArguments) (uintptr, *kernel.Sysc
 
 // Access implements Linux syscall access(2).
 func Access(t *kernel.Task, args arch.SyscallArguments) (uintptr, *kernel.SyscallControl, error) {
-	// FIXME(jamieliu): actually implement
-	return 0, nil, nil
+	addr := args[0].Pointer()
+	mode := args[1].ModeT()
+
+	return 0, nil, accessAt(t, linux.AT_FDCWD, addr, mode)
 }
 
-// Faccessat implements Linux syscall access(2).
+// Faccessat implements Linux syscall faccessat(2).
+//
+// Note that the faccessat() system call does not take a flags argument:
+// "The raw faccessat() system call takes only the first three arguments. The
+// AT_EACCESS and AT_SYMLINK_NOFOLLOW flags are actually implemented within
+// the glibc wrapper function for faccessat().  If either of these flags is
+// specified, then the wrapper function employs fstatat(2) to determine access
+// permissions." - faccessat(2)
 func Faccessat(t *kernel.Task, args arch.SyscallArguments) (uintptr, *kernel.SyscallControl, error) {
-	// FIXME(jamieliu): actually implement
-	return 0, nil, nil
+	dirfd := args[0].Int()
+	addr := args[1].Pointer()
+	mode := args[2].ModeT()
+
+	return 0, nil, accessAt(t, dirfd, addr, mode)
+}
+
+func accessAt(t *kernel.Task, dirfd int32, pathAddr usermem.Addr, mode uint) error {
+	const rOK = 4
+	const wOK = 2
+	const xOK = 1
+
+	// Sanity check the mode.
+	if mode&^(rOK|wOK|xOK) != 0 {
+		return syserror.EINVAL
+	}
+
+	path, err := copyInPath(t, pathAddr)
+	if err != nil {
+		return err
+	}
+	tpop, err := getTaskPathOperation(t, dirfd, path, disallowEmptyPath, followFinalSymlink)
+	if err != nil {
+		return err
+	}
+
+	// access(2) and faccessat(2) check permissions using real
+	// UID/GID, not effective UID/GID.
+	//
+	// "access() needs to use the real uid/gid, not the effective
+	// uid/gid. We do this by temporarily clearing all FS-related
+	// capabilities and switching the fsuid/fsgid around to the
+	// real ones." -fs/open.c:faccessat
+	creds := t.Credentials().Fork()
+	creds.EffectiveKUID = creds.RealKUID
+	creds.EffectiveKGID = creds.RealKGID
+	if creds.EffectiveKUID.In(creds.UserNamespace) == auth.RootUID {
+		creds.EffectiveCaps = creds.PermittedCaps
+	} else {
+		creds.EffectiveCaps = 0
+	}
+
+	return t.Kernel().VFS().AccessAt(t, creds, vfs.AccessTypes(mode), &tpop.pop)
 }
 
 // Readlinkat implements Linux syscall mknodat(2).

@@ -24,6 +24,7 @@ import (
 )
 
 const iptablesBinary = "iptables"
+const localIP = "127.0.0.1"
 
 // filterTable calls `iptables -t filter` with the given args.
 func filterTable(args ...string) error {
@@ -46,8 +47,17 @@ func tableCmd(table string, args []string) error {
 
 // filterTableRules is like filterTable, but runs multiple iptables commands.
 func filterTableRules(argsList [][]string) error {
+	return tableRules("filter", argsList)
+}
+
+// natTableRules is like natTable, but runs multiple iptables commands.
+func natTableRules(argsList [][]string) error {
+	return tableRules("nat", argsList)
+}
+
+func tableRules(table string, argsList [][]string) error {
 	for _, args := range argsList {
-		if err := filterTable(args...); err != nil {
+		if err := tableCmd(table, args); err != nil {
 			return err
 		}
 	}
@@ -125,27 +135,37 @@ func listenTCP(port int, timeout time.Duration) error {
 	return nil
 }
 
-// connectTCP connects the TCP server over specified local port, server IP and remote/server port.
-func connectTCP(ip net.IP, remotePort, localPort int, timeout time.Duration) error {
+// connectTCP connects to the given IP and port from an ephemeral local address.
+func connectTCP(ip net.IP, port int, timeout time.Duration) error {
 	contAddr := net.TCPAddr{
 		IP:   ip,
-		Port: remotePort,
+		Port: port,
 	}
 	// The container may not be listening when we first connect, so retry
 	// upon error.
 	callback := func() error {
-		localAddr := net.TCPAddr{
-			Port: localPort,
-		}
-		conn, err := net.DialTCP("tcp4", &localAddr, &contAddr)
+		conn, err := net.DialTCP("tcp4", nil, &contAddr)
 		if conn != nil {
 			conn.Close()
 		}
 		return err
 	}
 	if err := testutil.Poll(callback, timeout); err != nil {
-		return fmt.Errorf("timed out waiting to send IP, most recent error: %v", err)
+		return fmt.Errorf("timed out waiting to connect IP, most recent error: %v", err)
 	}
 
 	return nil
+}
+
+// localAddrs returns a list of local network interface addresses.
+func localAddrs() ([]string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+	addrStrs := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		addrStrs = append(addrStrs, addr.String())
+	}
+	return addrStrs, nil
 }

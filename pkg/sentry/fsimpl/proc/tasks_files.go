@@ -26,6 +26,7 @@ import (
 	"gvisor.dev/gvisor/pkg/sentry/kernel/auth"
 	"gvisor.dev/gvisor/pkg/sentry/kernel/time"
 	"gvisor.dev/gvisor/pkg/sentry/usage"
+	"gvisor.dev/gvisor/pkg/sentry/vfs"
 	"gvisor.dev/gvisor/pkg/syserror"
 	"gvisor.dev/gvisor/pkg/usermem"
 )
@@ -40,9 +41,9 @@ type selfSymlink struct {
 
 var _ kernfs.Inode = (*selfSymlink)(nil)
 
-func newSelfSymlink(creds *auth.Credentials, ino uint64, perm linux.FileMode, pidns *kernel.PIDNamespace) *kernfs.Dentry {
+func newSelfSymlink(creds *auth.Credentials, ino uint64, pidns *kernel.PIDNamespace) *kernfs.Dentry {
 	inode := &selfSymlink{pidns: pidns}
-	inode.Init(creds, ino, linux.ModeSymlink|perm)
+	inode.Init(creds, ino, linux.ModeSymlink|0777)
 
 	d := &kernfs.Dentry{}
 	d.Init(inode)
@@ -62,6 +63,11 @@ func (s *selfSymlink) Readlink(ctx context.Context) (string, error) {
 	return strconv.FormatUint(uint64(tgid), 10), nil
 }
 
+// SetStat implements Inode.SetStat not allowing inode attributes to be changed.
+func (*selfSymlink) SetStat(context.Context, *vfs.Filesystem, *auth.Credentials, vfs.SetStatOptions) error {
+	return syserror.EPERM
+}
+
 type threadSelfSymlink struct {
 	kernfs.InodeAttrs
 	kernfs.InodeNoopRefCount
@@ -72,9 +78,9 @@ type threadSelfSymlink struct {
 
 var _ kernfs.Inode = (*threadSelfSymlink)(nil)
 
-func newThreadSelfSymlink(creds *auth.Credentials, ino uint64, perm linux.FileMode, pidns *kernel.PIDNamespace) *kernfs.Dentry {
+func newThreadSelfSymlink(creds *auth.Credentials, ino uint64, pidns *kernel.PIDNamespace) *kernfs.Dentry {
 	inode := &threadSelfSymlink{pidns: pidns}
-	inode.Init(creds, ino, linux.ModeSymlink|perm)
+	inode.Init(creds, ino, linux.ModeSymlink|0777)
 
 	d := &kernfs.Dentry{}
 	d.Init(inode)
@@ -93,6 +99,23 @@ func (s *threadSelfSymlink) Readlink(ctx context.Context) (string, error) {
 		return "", syserror.ENOENT
 	}
 	return fmt.Sprintf("%d/task/%d", tgid, tid), nil
+}
+
+// SetStat implements Inode.SetStat not allowing inode attributes to be changed.
+func (*threadSelfSymlink) SetStat(context.Context, *vfs.Filesystem, *auth.Credentials, vfs.SetStatOptions) error {
+	return syserror.EPERM
+}
+
+// dynamicBytesFileSetAttr implements a special file that allows inode
+// attributes to be set. This is to support /proc files that are readonly, but
+// allow attributes to be set.
+type dynamicBytesFileSetAttr struct {
+	kernfs.DynamicBytesFile
+}
+
+// SetStat implements Inode.SetStat.
+func (d *dynamicBytesFileSetAttr) SetStat(ctx context.Context, fs *vfs.Filesystem, creds *auth.Credentials, opts vfs.SetStatOptions) error {
+	return d.DynamicBytesFile.InodeAttrs.SetStat(ctx, fs, creds, opts)
 }
 
 // cpuStats contains the breakdown of CPU time for /proc/stat.
@@ -137,22 +160,20 @@ func (c cpuStats) String() string {
 //
 // +stateify savable
 type statData struct {
-	kernfs.DynamicBytesFile
-
-	// k is the owning Kernel.
-	k *kernel.Kernel
+	dynamicBytesFileSetAttr
 }
 
 var _ dynamicInode = (*statData)(nil)
 
 // Generate implements vfs.DynamicBytesSource.Generate.
-func (s *statData) Generate(ctx context.Context, buf *bytes.Buffer) error {
+func (*statData) Generate(ctx context.Context, buf *bytes.Buffer) error {
 	// TODO(b/37226836): We currently export only zero CPU stats. We could
 	// at least provide some aggregate stats.
 	var cpu cpuStats
 	fmt.Fprintf(buf, "cpu  %s\n", cpu)
 
-	for c, max := uint(0), s.k.ApplicationCores(); c < max; c++ {
+	k := kernel.KernelFromContext(ctx)
+	for c, max := uint(0), k.ApplicationCores(); c < max; c++ {
 		fmt.Fprintf(buf, "cpu%d %s\n", c, cpu)
 	}
 
@@ -176,7 +197,7 @@ func (s *statData) Generate(ctx context.Context, buf *bytes.Buffer) error {
 	fmt.Fprintf(buf, "ctxt 0\n")
 
 	// CLOCK_REALTIME timestamp from boot, in seconds.
-	fmt.Fprintf(buf, "btime %d\n", s.k.Timekeeper().BootTime().Seconds())
+	fmt.Fprintf(buf, "btime %d\n", k.Timekeeper().BootTime().Seconds())
 
 	// Total number of clones.
 	// TODO(b/37226836): Count this.
@@ -203,13 +224,13 @@ func (s *statData) Generate(ctx context.Context, buf *bytes.Buffer) error {
 //
 // +stateify savable
 type loadavgData struct {
-	kernfs.DynamicBytesFile
+	dynamicBytesFileSetAttr
 }
 
 var _ dynamicInode = (*loadavgData)(nil)
 
 // Generate implements vfs.DynamicBytesSource.Generate.
-func (d *loadavgData) Generate(ctx context.Context, buf *bytes.Buffer) error {
+func (*loadavgData) Generate(ctx context.Context, buf *bytes.Buffer) error {
 	// TODO(b/62345059): Include real data in fields.
 	// Column 1-3: CPU and IO utilization of the last 1, 5, and 10 minute periods.
 	// Column 4-5: currently running processes and the total number of processes.
@@ -222,17 +243,15 @@ func (d *loadavgData) Generate(ctx context.Context, buf *bytes.Buffer) error {
 //
 // +stateify savable
 type meminfoData struct {
-	kernfs.DynamicBytesFile
-
-	// k is the owning Kernel.
-	k *kernel.Kernel
+	dynamicBytesFileSetAttr
 }
 
 var _ dynamicInode = (*meminfoData)(nil)
 
 // Generate implements vfs.DynamicBytesSource.Generate.
-func (d *meminfoData) Generate(ctx context.Context, buf *bytes.Buffer) error {
-	mf := d.k.MemoryFile()
+func (*meminfoData) Generate(ctx context.Context, buf *bytes.Buffer) error {
+	k := kernel.KernelFromContext(ctx)
+	mf := k.MemoryFile()
 	mf.UpdateUsage()
 	snapshot, totalUsage := usage.MemoryAccounting.Copy()
 	totalSize := usage.TotalMemory(mf.TotalSize(), totalUsage)
@@ -275,7 +294,7 @@ func (d *meminfoData) Generate(ctx context.Context, buf *bytes.Buffer) error {
 //
 // +stateify savable
 type uptimeData struct {
-	kernfs.DynamicBytesFile
+	dynamicBytesFileSetAttr
 }
 
 var _ dynamicInode = (*uptimeData)(nil)
@@ -294,17 +313,15 @@ func (*uptimeData) Generate(ctx context.Context, buf *bytes.Buffer) error {
 //
 // +stateify savable
 type versionData struct {
-	kernfs.DynamicBytesFile
-
-	// k is the owning Kernel.
-	k *kernel.Kernel
+	dynamicBytesFileSetAttr
 }
 
 var _ dynamicInode = (*versionData)(nil)
 
 // Generate implements vfs.DynamicBytesSource.Generate.
-func (v *versionData) Generate(ctx context.Context, buf *bytes.Buffer) error {
-	init := v.k.GlobalInit()
+func (*versionData) Generate(ctx context.Context, buf *bytes.Buffer) error {
+	k := kernel.KernelFromContext(ctx)
+	init := k.GlobalInit()
 	if init == nil {
 		// Attempted to read before the init Task is created. This can
 		// only occur during startup, which should never need to read
@@ -333,5 +350,21 @@ func (v *versionData) Generate(ctx context.Context, buf *bytes.Buffer) error {
 	// namespace).
 	ver := init.Leader().SyscallTable().Version
 	fmt.Fprintf(buf, "%s version %s %s\n", ver.Sysname, ver.Release, ver.Version)
+	return nil
+}
+
+// filesystemsData backs /proc/filesystems.
+//
+// +stateify savable
+type filesystemsData struct {
+	kernfs.DynamicBytesFile
+}
+
+var _ dynamicInode = (*filesystemsData)(nil)
+
+// Generate implements vfs.DynamicBytesSource.Generate.
+func (d *filesystemsData) Generate(ctx context.Context, buf *bytes.Buffer) error {
+	k := kernel.KernelFromContext(ctx)
+	k.VFS().GenerateProcFilesystems(buf)
 	return nil
 }

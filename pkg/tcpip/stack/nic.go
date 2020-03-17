@@ -15,6 +15,7 @@
 package stack
 
 import (
+	"fmt"
 	"log"
 	"reflect"
 	"sort"
@@ -55,7 +56,7 @@ type NIC struct {
 		primary       map[tcpip.NetworkProtocolNumber][]*referencedNetworkEndpoint
 		endpoints     map[NetworkEndpointID]*referencedNetworkEndpoint
 		addressRanges []tcpip.Subnet
-		mcastJoins    map[NetworkEndpointID]int32
+		mcastJoins    map[NetworkEndpointID]uint32
 		// packetEPs is protected by mu, but the contained PacketEndpoint
 		// values are not.
 		packetEPs map[tcpip.NetworkProtocolNumber][]PacketEndpoint
@@ -122,15 +123,15 @@ func newNIC(stack *Stack, id tcpip.NICID, name string, ep LinkEndpoint, ctx NICC
 	}
 	nic.mu.primary = make(map[tcpip.NetworkProtocolNumber][]*referencedNetworkEndpoint)
 	nic.mu.endpoints = make(map[NetworkEndpointID]*referencedNetworkEndpoint)
-	nic.mu.mcastJoins = make(map[NetworkEndpointID]int32)
+	nic.mu.mcastJoins = make(map[NetworkEndpointID]uint32)
 	nic.mu.packetEPs = make(map[tcpip.NetworkProtocolNumber][]PacketEndpoint)
 	nic.mu.ndp = ndpState{
-		nic:              nic,
-		configs:          stack.ndpConfigs,
-		dad:              make(map[tcpip.Address]dadState),
-		defaultRouters:   make(map[tcpip.Address]defaultRouterState),
-		onLinkPrefixes:   make(map[tcpip.Subnet]onLinkPrefixState),
-		autoGenAddresses: make(map[tcpip.Address]autoGenAddressState),
+		nic:            nic,
+		configs:        stack.ndpConfigs,
+		dad:            make(map[tcpip.Address]dadState),
+		defaultRouters: make(map[tcpip.Address]defaultRouterState),
+		onLinkPrefixes: make(map[tcpip.Subnet]onLinkPrefixState),
+		slaacPrefixes:  make(map[tcpip.Subnet]slaacPrefixState),
 	}
 
 	// Register supported packet endpoint protocols.
@@ -166,8 +167,17 @@ func (n *NIC) disable() *tcpip.Error {
 	}
 
 	n.mu.Lock()
-	defer n.mu.Unlock()
+	err := n.disableLocked()
+	n.mu.Unlock()
+	return err
+}
 
+// disableLocked disables n.
+//
+// It undoes the work done by enable.
+//
+// n MUST be locked.
+func (n *NIC) disableLocked() *tcpip.Error {
 	if !n.mu.enabled {
 		return nil
 	}
@@ -190,7 +200,7 @@ func (n *NIC) disable() *tcpip.Error {
 		}
 
 		// The NIC may have already left the multicast group.
-		if err := n.leaveGroupLocked(header.IPv6AllNodesMulticastAddress); err != nil && err != tcpip.ErrBadLocalAddress {
+		if err := n.leaveGroupLocked(header.IPv6AllNodesMulticastAddress, false /* force */); err != nil && err != tcpip.ErrBadLocalAddress {
 			return err
 		}
 	}
@@ -306,24 +316,33 @@ func (n *NIC) remove() *tcpip.Error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Detach from link endpoint, so no packet comes in.
-	n.linkEP.Attach(nil)
+	n.disableLocked()
+
+	// TODO(b/151378115): come up with a better way to pick an error than the
+	// first one.
+	var err *tcpip.Error
+
+	// Forcefully leave multicast groups.
+	for nid := range n.mu.mcastJoins {
+		if tempErr := n.leaveGroupLocked(nid.LocalAddress, true /* force */); tempErr != nil && err == nil {
+			err = tempErr
+		}
+	}
 
 	// Remove permanent and permanentTentative addresses, so no packet goes out.
-	var errs []*tcpip.Error
 	for nid, ref := range n.mu.endpoints {
 		switch ref.getKind() {
 		case permanentTentative, permanent:
-			if err := n.removePermanentAddressLocked(nid.LocalAddress); err != nil {
-				errs = append(errs, err)
+			if tempErr := n.removePermanentAddressLocked(nid.LocalAddress); tempErr != nil && err == nil {
+				err = tempErr
 			}
 		}
 	}
-	if len(errs) > 0 {
-		return errs[0]
-	}
 
-	return nil
+	// Detach from link endpoint, so no packet comes in.
+	n.linkEP.Attach(nil)
+
+	return err
 }
 
 // becomeIPv6Router transitions n into an IPv6 router.
@@ -452,7 +471,7 @@ func (n *NIC) primaryIPv6Endpoint(remoteAddr tcpip.Address) *referencedNetworkEn
 	cs := make([]ipv6AddrCandidate, 0, len(primaryAddrs))
 	for _, r := range primaryAddrs {
 		// If r is not valid for outgoing connections, it is not a valid endpoint.
-		if !r.isValidForOutgoing() {
+		if !r.isValidForOutgoingRLocked() {
 			continue
 		}
 
@@ -970,6 +989,7 @@ func (n *NIC) removeEndpointLocked(r *referencedNetworkEndpoint) {
 	for i, ref := range refs {
 		if ref == r {
 			n.mu.primary[r.protocol] = append(refs[:i], refs[i+1:]...)
+			refs[len(refs)-1] = nil
 			break
 		}
 	}
@@ -997,8 +1017,7 @@ func (n *NIC) removePermanentAddressLocked(addr tcpip.Address) *tcpip.Error {
 	isIPv6Unicast := r.protocol == header.IPv6ProtocolNumber && header.IsV6UnicastAddress(addr)
 
 	if isIPv6Unicast {
-		// If we are removing a tentative IPv6 unicast address, stop
-		// DAD.
+		// If we are removing a tentative IPv6 unicast address, stop DAD.
 		if kind == permanentTentative {
 			n.mu.ndp.stopDuplicateAddressDetection(addr)
 		}
@@ -1006,7 +1025,10 @@ func (n *NIC) removePermanentAddressLocked(addr tcpip.Address) *tcpip.Error {
 		// If we are removing an address generated via SLAAC, cleanup
 		// its SLAAC resources and notify the integrator.
 		if r.configType == slaac {
-			n.mu.ndp.cleanupAutoGenAddrResourcesAndNotify(addr)
+			n.mu.ndp.cleanupSLAACAddrResourcesAndNotify(tcpip.AddressWithPrefix{
+				Address:   addr,
+				PrefixLen: r.ep.PrefixLen(),
+			})
 		}
 	}
 
@@ -1020,9 +1042,12 @@ func (n *NIC) removePermanentAddressLocked(addr tcpip.Address) *tcpip.Error {
 
 	// If we are removing an IPv6 unicast address, leave the solicited-node
 	// multicast address.
+	//
+	// We ignore the tcpip.ErrBadLocalAddress error because the solicited-node
+	// multicast group may be left by user action.
 	if isIPv6Unicast {
 		snmc := header.SolicitedNodeAddr(addr)
-		if err := n.leaveGroupLocked(snmc); err != nil {
+		if err := n.leaveGroupLocked(snmc, false /* force */); err != nil && err != tcpip.ErrBadLocalAddress {
 			return err
 		}
 	}
@@ -1082,26 +1107,31 @@ func (n *NIC) leaveGroup(addr tcpip.Address) *tcpip.Error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	return n.leaveGroupLocked(addr)
+	return n.leaveGroupLocked(addr, false /* force */)
 }
 
 // leaveGroupLocked decrements the count for the given multicast address, and
 // when it reaches zero removes the endpoint for this address. n MUST be locked
 // before leaveGroupLocked is called.
-func (n *NIC) leaveGroupLocked(addr tcpip.Address) *tcpip.Error {
+//
+// If force is true, then the count for the multicast addres is ignored and the
+// endpoint will be removed immediately.
+func (n *NIC) leaveGroupLocked(addr tcpip.Address, force bool) *tcpip.Error {
 	id := NetworkEndpointID{addr}
-	joins := n.mu.mcastJoins[id]
-	switch joins {
-	case 0:
+	joins, ok := n.mu.mcastJoins[id]
+	if !ok {
 		// There are no joins with this address on this NIC.
 		return tcpip.ErrBadLocalAddress
-	case 1:
-		// This is the last one, clean up.
-		if err := n.removePermanentAddressLocked(addr); err != nil {
-			return err
-		}
 	}
-	n.mu.mcastJoins[id] = joins - 1
+
+	joins--
+	if force || joins == 0 {
+		// There are no outstanding joins or we are forced to leave, clean up.
+		delete(n.mu.mcastJoins, id)
+		return n.removePermanentAddressLocked(addr)
+	}
+
+	n.mu.mcastJoins[id] = joins
 	return nil
 }
 
@@ -1213,10 +1243,6 @@ func (n *NIC) DeliverNetworkPacket(linkEP LinkEndpoint, remote, local tcpip.Link
 			n.stack.stats.IP.InvalidDestinationAddressesReceived.Increment()
 			return
 		}
-		defer r.Release()
-
-		r.LocalLinkAddress = n.linkEP.LinkAddress()
-		r.RemoteLinkAddress = remote
 
 		// Found a NIC.
 		n := r.ref.nic
@@ -1225,24 +1251,33 @@ func (n *NIC) DeliverNetworkPacket(linkEP LinkEndpoint, remote, local tcpip.Link
 		ok = ok && ref.isValidForOutgoingRLocked() && ref.tryIncRef()
 		n.mu.RUnlock()
 		if ok {
+			r.LocalLinkAddress = n.linkEP.LinkAddress()
+			r.RemoteLinkAddress = remote
 			r.RemoteAddress = src
 			// TODO(b/123449044): Update the source NIC as well.
 			ref.ep.HandlePacket(&r, pkt)
 			ref.decRef()
-		} else {
-			// n doesn't have a destination endpoint.
-			// Send the packet out of n.
-			pkt.Header = buffer.NewPrependableFromView(pkt.Data.First())
-			pkt.Data.RemoveFirst()
-
-			// TODO(b/128629022): use route.WritePacket.
-			if err := n.linkEP.WritePacket(&r, nil /* gso */, protocol, pkt); err != nil {
-				r.Stats().IP.OutgoingPacketErrors.Increment()
-			} else {
-				n.stats.Tx.Packets.Increment()
-				n.stats.Tx.Bytes.IncrementBy(uint64(pkt.Header.UsedLength() + pkt.Data.Size()))
-			}
+			r.Release()
+			return
 		}
+
+		// n doesn't have a destination endpoint.
+		// Send the packet out of n.
+		// TODO(b/128629022): move this logic to route.WritePacket.
+		if ch, err := r.Resolve(nil); err != nil {
+			if err == tcpip.ErrWouldBlock {
+				n.stack.forwarder.enqueue(ch, n, &r, protocol, pkt)
+				// forwarder will release route.
+				return
+			}
+			n.stack.stats.IP.InvalidDestinationAddressesReceived.Increment()
+			r.Release()
+			return
+		}
+
+		// The link-address resolution finished immediately.
+		n.forwardPacket(&r, protocol, pkt)
+		r.Release()
 		return
 	}
 
@@ -1250,6 +1285,35 @@ func (n *NIC) DeliverNetworkPacket(linkEP LinkEndpoint, remote, local tcpip.Link
 	if len(packetEPs) == 0 {
 		n.stack.stats.IP.InvalidDestinationAddressesReceived.Increment()
 	}
+}
+
+func (n *NIC) forwardPacket(r *Route, protocol tcpip.NetworkProtocolNumber, pkt tcpip.PacketBuffer) {
+	// TODO(b/143425874) Decrease the TTL field in forwarded packets.
+
+	firstData := pkt.Data.First()
+	pkt.Data.RemoveFirst()
+
+	if linkHeaderLen := int(n.linkEP.MaxHeaderLength()); linkHeaderLen == 0 {
+		pkt.Header = buffer.NewPrependableFromView(firstData)
+	} else {
+		firstDataLen := len(firstData)
+
+		// pkt.Header should have enough capacity to hold n.linkEP's headers.
+		pkt.Header = buffer.NewPrependable(firstDataLen + linkHeaderLen)
+
+		// TODO(b/151227689): avoid copying the packet when forwarding
+		if n := copy(pkt.Header.Prepend(firstDataLen), firstData); n != firstDataLen {
+			panic(fmt.Sprintf("copied %d bytes, expected %d", n, firstDataLen))
+		}
+	}
+
+	if err := n.linkEP.WritePacket(r, nil /* gso */, protocol, pkt); err != nil {
+		r.Stats().IP.OutgoingPacketErrors.Increment()
+		return
+	}
+
+	n.stats.Tx.Packets.Increment()
+	n.stats.Tx.Bytes.IncrementBy(uint64(pkt.Header.UsedLength() + pkt.Data.Size()))
 }
 
 // DeliverTransportPacket delivers the packets to the appropriate transport

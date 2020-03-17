@@ -295,6 +295,7 @@ func (h *handshake) synSentState(s *segment) *tcpip.Error {
 	h.state = handshakeSynRcvd
 	h.ep.mu.Lock()
 	ttl := h.ep.ttl
+	amss := h.ep.amss
 	h.ep.setEndpointState(StateSynRecv)
 	h.ep.mu.Unlock()
 	synOpts := header.TCPSynOptions{
@@ -307,7 +308,7 @@ func (h *handshake) synSentState(s *segment) *tcpip.Error {
 		// permits SACK. This is not explicitly defined in the RFC but
 		// this is the behaviour implemented by Linux.
 		SACKPermitted: rcvSynOpts.SACKPermitted,
-		MSS:           h.ep.amss,
+		MSS:           amss,
 	}
 	if ttl == 0 {
 		ttl = s.route.DefaultTTL()
@@ -356,6 +357,10 @@ func (h *handshake) synRcvdState(s *segment) *tcpip.Error {
 			return tcpip.ErrInvalidEndpointState
 		}
 
+		h.ep.mu.RLock()
+		amss := h.ep.amss
+		h.ep.mu.RUnlock()
+
 		h.resetState()
 		synOpts := header.TCPSynOptions{
 			WS:            h.rcvWndScale,
@@ -363,7 +368,7 @@ func (h *handshake) synRcvdState(s *segment) *tcpip.Error {
 			TSVal:         h.ep.timestamp(),
 			TSEcr:         h.ep.recentTimestamp(),
 			SACKPermitted: h.ep.sackPermitted,
-			MSS:           h.ep.amss,
+			MSS:           amss,
 		}
 		h.ep.sendSynTCP(&s.route, h.ep.ID, h.ep.ttl, h.ep.sendTOS, h.flags, h.iss, h.ackNum, h.rcvWnd, synOpts)
 		return nil
@@ -530,6 +535,7 @@ func (h *handshake) execute() *tcpip.Error {
 
 	// Send the initial SYN segment and loop until the handshake is
 	// completed.
+	h.ep.mu.Lock()
 	h.ep.amss = calculateAdvertisedMSS(h.ep.userMSS, h.ep.route)
 
 	synOpts := header.TCPSynOptions{
@@ -540,6 +546,7 @@ func (h *handshake) execute() *tcpip.Error {
 		SACKPermitted: bool(sackEnabled),
 		MSS:           h.ep.amss,
 	}
+	h.ep.mu.Unlock()
 
 	// Execute is also called in a listen context so we want to make sure we
 	// only send the TS/SACK option when we received the TS/SACK in the
@@ -577,7 +584,7 @@ func (h *handshake) execute() *tcpip.Error {
 
 		case wakerForNotification:
 			n := h.ep.fetchNotifications()
-			if n&notifyClose != 0 {
+			if (n&notifyClose)|(n&notifyAbort) != 0 {
 				return tcpip.ErrAborted
 			}
 			if n&notifyDrain != 0 {
@@ -617,17 +624,17 @@ func parseSynSegmentOptions(s *segment) header.TCPSynOptions {
 
 var optionPool = sync.Pool{
 	New: func() interface{} {
-		return make([]byte, maxOptionSize)
+		return &[maxOptionSize]byte{}
 	},
 }
 
 func getOptions() []byte {
-	return optionPool.Get().([]byte)
+	return (*optionPool.Get().(*[maxOptionSize]byte))[:]
 }
 
 func putOptions(options []byte) {
 	// Reslice to full capacity.
-	optionPool.Put(options[0:cap(options)])
+	optionPool.Put(optionsToArray(options))
 }
 
 func makeSynOptions(opts header.TCPSynOptions) []byte {
@@ -1640,6 +1647,7 @@ func (e *endpoint) doTimeWait() (twReuse func()) {
 	const timeWaitDone = 3
 
 	s := sleep.Sleeper{}
+	defer s.Done()
 	s.AddWaker(&e.newSegmentWaker, newSegment)
 	s.AddWaker(&e.notificationWaker, notification)
 

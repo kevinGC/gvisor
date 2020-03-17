@@ -176,8 +176,6 @@ type Dentry struct {
 	vfsd  vfs.Dentry
 	inode Inode
 
-	refs uint64
-
 	// flags caches useful information about the dentry from the inode. See the
 	// dflags* consts above. Must be accessed by atomic ops.
 	flags uint32
@@ -302,7 +300,8 @@ type Inode interface {
 	// this inode. The returned file description should hold a reference on the
 	// inode for its lifetime.
 	//
-	// Precondition: !rp.Done(). vfsd.Impl() must be a kernfs Dentry.
+	// Precondition: rp.Done(). vfsd.Impl() must be the kernfs Dentry containing
+	// the inode on which Open() is being called.
 	Open(rp *vfs.ResolvingPath, vfsd *vfs.Dentry, opts vfs.OpenOptions) (*vfs.FileDescription, error)
 }
 
@@ -320,7 +319,7 @@ type inodeMetadata interface {
 	// CheckPermissions checks that creds may access this inode for the
 	// requested access type, per the the rules of
 	// fs/namei.c:generic_permission().
-	CheckPermissions(ctx context.Context, creds *auth.Credentials, atx vfs.AccessTypes) error
+	CheckPermissions(ctx context.Context, creds *auth.Credentials, ats vfs.AccessTypes) error
 
 	// Mode returns the (struct stat)::st_mode value for this inode. This is
 	// separated from Stat for performance.
@@ -328,11 +327,13 @@ type inodeMetadata interface {
 
 	// Stat returns the metadata for this inode. This corresponds to
 	// vfs.FilesystemImpl.StatAt.
-	Stat(fs *vfs.Filesystem) linux.Statx
+	Stat(fs *vfs.Filesystem, opts vfs.StatOptions) (linux.Statx, error)
 
 	// SetStat updates the metadata for this inode. This corresponds to
-	// vfs.FilesystemImpl.SetStatAt.
-	SetStat(fs *vfs.Filesystem, opts vfs.SetStatOptions) error
+	// vfs.FilesystemImpl.SetStatAt. Implementations are responsible for checking
+	// if the operation can be performed (see vfs.CheckSetStat() for common
+	// checks).
+	SetStat(ctx context.Context, fs *vfs.Filesystem, creds *auth.Credentials, opts vfs.SetStatOptions) error
 }
 
 // Precondition: All methods in this interface may only be called on directory

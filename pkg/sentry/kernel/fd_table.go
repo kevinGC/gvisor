@@ -191,10 +191,12 @@ func (f *FDTable) Size() int {
 	return int(size)
 }
 
-// forEach iterates over all non-nil files.
+// forEach iterates over all non-nil files in sorted order.
 //
 // It is the caller's responsibility to acquire an appropriate lock.
 func (f *FDTable) forEach(fn func(fd int32, file *fs.File, fileVFS2 *vfs.FileDescription, flags FDFlags)) {
+	// retries tracks the number of failed TryIncRef attempts for the same FD.
+	retries := 0
 	fd := int32(0)
 	for {
 		file, fileVFS2, flags, ok := f.getAll(fd)
@@ -204,17 +206,26 @@ func (f *FDTable) forEach(fn func(fd int32, file *fs.File, fileVFS2 *vfs.FileDes
 		switch {
 		case file != nil:
 			if !file.TryIncRef() {
+				retries++
+				if retries > 1000 {
+					panic(fmt.Sprintf("File in FD table has been destroyed. FD: %d, File: %+v, FileOps: %+v", fd, file, file.FileOperations))
+				}
 				continue // Race caught.
 			}
 			fn(fd, file, nil, flags)
 			file.DecRef()
 		case fileVFS2 != nil:
 			if !fileVFS2.TryIncRef() {
+				retries++
+				if retries > 1000 {
+					panic(fmt.Sprintf("File in FD table has been destroyed. FD: %d, File: %+v, Impl: %+v", fd, fileVFS2, fileVFS2.Impl()))
+				}
 				continue // Race caught.
 			}
 			fn(fd, nil, fileVFS2, flags)
 			fileVFS2.DecRef()
 		}
+		retries = 0
 		fd++
 	}
 }
@@ -447,7 +458,10 @@ func (f *FDTable) GetVFS2(fd int32) (*vfs.FileDescription, FDFlags) {
 	}
 }
 
-// GetFDs returns a list of valid fds.
+// GetFDs returns a sorted list of valid fds.
+//
+// Precondition: The caller must be running on the task goroutine, or Task.mu
+// must be locked.
 func (f *FDTable) GetFDs() []int32 {
 	fds := make([]int32, 0, int(atomic.LoadInt32(&f.used)))
 	f.forEach(func(fd int32, _ *fs.File, _ *vfs.FileDescription, _ FDFlags) {
@@ -522,7 +536,9 @@ func (f *FDTable) Remove(fd int32) (*fs.File, *vfs.FileDescription) {
 	case orig2 != nil:
 		orig2.IncRef()
 	}
-	f.setAll(fd, nil, nil, FDFlags{}) // Zap entry.
+	if orig != nil || orig2 != nil {
+		f.setAll(fd, nil, nil, FDFlags{}) // Zap entry.
+	}
 	return orig, orig2
 }
 

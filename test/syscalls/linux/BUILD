@@ -167,11 +167,6 @@ cc_library(
 )
 
 cc_library(
-    name = "temp_umask",
-    hdrs = ["temp_umask.h"],
-)
-
-cc_library(
     name = "unix_domain_socket_test_util",
     testonly = 1,
     srcs = ["unix_domain_socket_test_util.cc"],
@@ -608,7 +603,10 @@ cc_binary(
 cc_binary(
     name = "exceptions_test",
     testonly = 1,
-    srcs = ["exceptions.cc"],
+    srcs = select_arch(
+        amd64 = ["exceptions.cc"],
+        arm64 = [],
+    ),
     linkstatic = 1,
     deps = [
         gtest,
@@ -1140,11 +1138,11 @@ cc_binary(
     srcs = ["mkdir.cc"],
     linkstatic = 1,
     deps = [
-        ":temp_umask",
         "//test/util:capability_util",
         "//test/util:fs_util",
         gtest,
         "//test/util:temp_path",
+        "//test/util:temp_umask",
         "//test/util:test_main",
         "//test/util:test_util",
     ],
@@ -1299,12 +1297,12 @@ cc_binary(
     srcs = ["open_create.cc"],
     linkstatic = 1,
     deps = [
-        ":temp_umask",
         "//test/util:capability_util",
         "//test/util:file_descriptor",
         "//test/util:fs_util",
         gtest,
         "//test/util:temp_path",
+        "//test/util:temp_umask",
         "//test/util:test_main",
         "//test/util:test_util",
     ],
@@ -1475,7 +1473,10 @@ cc_binary(
 cc_binary(
     name = "arch_prctl_test",
     testonly = 1,
-    srcs = ["arch_prctl.cc"],
+    srcs = select_arch(
+        amd64 = ["arch_prctl.cc"],
+        arm64 = [],
+    ),
     linkstatic = 1,
     deps = [
         "//test/util:file_descriptor",
@@ -1627,6 +1628,19 @@ cc_binary(
         gtest,
         "//test/util:test_main",
         "//test/util:test_util",
+    ],
+)
+
+cc_binary(
+    name = "proc_pid_oomscore_test",
+    testonly = 1,
+    srcs = ["proc_pid_oomscore.cc"],
+    linkstatic = 1,
+    deps = [
+        "//test/util:fs_util",
+        "//test/util:test_main",
+        "//test/util:test_util",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -3322,7 +3336,10 @@ cc_binary(
 cc_binary(
     name = "sysret_test",
     testonly = 1,
-    srcs = ["sysret.cc"],
+    srcs = select_arch(
+        amd64 = ["sysret.cc"],
+        arm64 = [],
+    ),
     linkstatic = 1,
     deps = [
         gtest,
@@ -3457,6 +3474,18 @@ cc_binary(
         "//test/util:test_main",
         "//test/util:test_util",
         "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_binary(
+    name = "tuntap_hostinet_test",
+    testonly = 1,
+    srcs = ["tuntap_hostinet.cc"],
+    linkstatic = 1,
+    deps = [
+        gtest,
+        "//test/util:test_main",
+        "//test/util:test_util",
     ],
 )
 
@@ -3678,11 +3707,10 @@ cc_binary(
         ":socket_test_util",
         gtest,
         "//test/util:capability_util",
-        "//test/util:memory_util",
+        "//test/util:posix_error",
         "//test/util:test_main",
         "//test/util:test_util",
         "//test/util:thread_util",
-        "@com_google_absl//absl/synchronization",
     ],
 )
 

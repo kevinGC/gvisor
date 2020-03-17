@@ -143,6 +143,20 @@ TEST_P(TcpSocketTest, ConnectOnEstablishedConnection) {
       SyscallFailsWithErrno(EISCONN));
 }
 
+TEST_P(TcpSocketTest, ShutdownWriteInTimeWait) {
+  EXPECT_THAT(shutdown(t_, SHUT_WR), SyscallSucceeds());
+  EXPECT_THAT(shutdown(s_, SHUT_RDWR), SyscallSucceeds());
+  absl::SleepFor(absl::Seconds(1));  // Wait to enter TIME_WAIT.
+  EXPECT_THAT(shutdown(t_, SHUT_WR), SyscallFailsWithErrno(ENOTCONN));
+}
+
+TEST_P(TcpSocketTest, ShutdownWriteInFinWait1) {
+  EXPECT_THAT(shutdown(t_, SHUT_WR), SyscallSucceeds());
+  EXPECT_THAT(shutdown(t_, SHUT_WR), SyscallSucceeds());
+  absl::SleepFor(absl::Seconds(1));  // Wait to enter FIN-WAIT2.
+  EXPECT_THAT(shutdown(t_, SHUT_WR), SyscallSucceeds());
+}
+
 TEST_P(TcpSocketTest, DataCoalesced) {
   char buf[10];
 
@@ -1347,6 +1361,21 @@ TEST_P(SimpleTcpSocketTest, RecvOnClosedSocket) {
   EXPECT_THAT(recv(s.get(), buf, 0, 0), SyscallFailsWithErrno(ENOTCONN));
   EXPECT_THAT(recv(s.get(), buf, sizeof(buf), 0),
               SyscallFailsWithErrno(ENOTCONN));
+}
+
+TEST_P(SimpleTcpSocketTest, TCPConnectSoRcvBufRace) {
+  auto s = ASSERT_NO_ERRNO_AND_VALUE(
+      Socket(GetParam(), SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_TCP));
+  sockaddr_storage addr =
+      ASSERT_NO_ERRNO_AND_VALUE(InetLoopbackAddr(GetParam()));
+  socklen_t addrlen = sizeof(addr);
+
+  RetryEINTR(connect)(s.get(), reinterpret_cast<struct sockaddr*>(&addr),
+                      addrlen);
+  int buf_sz = 1 << 18;
+  EXPECT_THAT(
+      setsockopt(s.get(), SOL_SOCKET, SO_RCVBUF, &buf_sz, sizeof(buf_sz)),
+      SyscallSucceedsWithValue(0));
 }
 
 INSTANTIATE_TEST_SUITE_P(AllInetTests, SimpleTcpSocketTest,

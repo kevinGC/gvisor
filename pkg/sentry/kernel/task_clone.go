@@ -15,6 +15,8 @@
 package kernel
 
 import (
+	"sync/atomic"
+
 	"gvisor.dev/gvisor/pkg/abi/linux"
 	"gvisor.dev/gvisor/pkg/bpf"
 	"gvisor.dev/gvisor/pkg/sentry/inet"
@@ -260,6 +262,7 @@ func (t *Task) Clone(opts *CloneOptions) (ThreadID, *SyscallControl, error) {
 			sh = sh.Fork()
 		}
 		tg = t.k.NewThreadGroup(tg.mounts, pidns, sh, opts.TerminationSignal, tg.limits.GetCopy())
+		tg.oomScoreAdj = atomic.LoadInt32(&t.tg.oomScoreAdj)
 		rseqAddr = t.rseqAddr
 		rseqSignature = t.rseqSignature
 	}

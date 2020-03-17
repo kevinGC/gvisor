@@ -27,9 +27,12 @@ func init() {
 	RegisterTestCase(FilterOutputAcceptUDPOwner{})
 	RegisterTestCase(FilterOutputDropUDPOwner{})
 	RegisterTestCase(FilterOutputOwnerFail{})
+	RegisterTestCase(FilterOutputDestination{})
+	RegisterTestCase(FilterOutputInvertDestination{})
 }
 
-// FilterOutputDropTCPDestPort tests that connections are not accepted on specified source ports.
+// FilterOutputDropTCPDestPort tests that connections are not accepted on
+// specified source ports.
 type FilterOutputDropTCPDestPort struct{}
 
 // Name implements TestCase.Name.
@@ -53,14 +56,15 @@ func (FilterOutputDropTCPDestPort) ContainerAction(ip net.IP) error {
 
 // LocalAction implements TestCase.LocalAction.
 func (FilterOutputDropTCPDestPort) LocalAction(ip net.IP) error {
-	if err := connectTCP(ip, acceptPort, dropPort, sendloopDuration); err == nil {
+	if err := connectTCP(ip, acceptPort, sendloopDuration); err == nil {
 		return fmt.Errorf("connection on port %d should not be accepted, but got accepted", dropPort)
 	}
 
 	return nil
 }
 
-// FilterOutputDropTCPSrcPort tests that connections are not accepted on specified source ports.
+// FilterOutputDropTCPSrcPort tests that connections are not accepted on
+// specified source ports.
 type FilterOutputDropTCPSrcPort struct{}
 
 // Name implements TestCase.Name.
@@ -84,7 +88,7 @@ func (FilterOutputDropTCPSrcPort) ContainerAction(ip net.IP) error {
 
 // LocalAction implements TestCase.LocalAction.
 func (FilterOutputDropTCPSrcPort) LocalAction(ip net.IP) error {
-	if err := connectTCP(ip, dropPort, acceptPort, sendloopDuration); err == nil {
+	if err := connectTCP(ip, dropPort, sendloopDuration); err == nil {
 		return fmt.Errorf("connection destined to port %d should not be accepted, but got accepted", dropPort)
 	}
 
@@ -227,4 +231,58 @@ func (FilterOutputOwnerFail) ContainerAction(ip net.IP) error {
 func (FilterOutputOwnerFail) LocalAction(ip net.IP) error {
 	// no-op.
 	return nil
+}
+  
+// FilterOutputDestination tests that we can selectively allow packets to
+// certain destinations.
+type FilterOutputDestination struct{}
+
+// Name implements TestCase.Name.
+func (FilterOutputDestination) Name() string {
+	return "FilterOutputDestination"
+}
+
+// ContainerAction implements TestCase.ContainerAction.
+func (FilterOutputDestination) ContainerAction(ip net.IP) error {
+	rules := [][]string{
+		{"-A", "OUTPUT", "-d", ip.String(), "-j", "ACCEPT"},
+		{"-P", "OUTPUT", "DROP"},
+	}
+	if err := filterTableRules(rules); err != nil {
+		return err
+	}
+  
+  return sendUDPLoop(ip, acceptPort, sendloopDuration)
+}
+
+// LocalAction implements TestCase.LocalAction.
+func (FilterOutputDestination) LocalAction(ip net.IP) error {
+	return listenUDP(acceptPort, sendloopDuration)
+}
+
+// FilterOutputInvertDestination tests that we can selectively allow packets
+// not headed for a particular destination.
+type FilterOutputInvertDestination struct{}
+
+// Name implements TestCase.Name.
+func (FilterOutputInvertDestination) Name() string {
+	return "FilterOutputInvertDestination"
+}
+
+// ContainerAction implements TestCase.ContainerAction.
+func (FilterOutputInvertDestination) ContainerAction(ip net.IP) error {
+	rules := [][]string{
+		{"-A", "OUTPUT", "!", "-d", localIP, "-j", "ACCEPT"},
+		{"-P", "OUTPUT", "DROP"},
+	}
+	if err := filterTableRules(rules); err != nil {
+		return err
+	}
+
+	return sendUDPLoop(ip, acceptPort, sendloopDuration)
+}
+
+// LocalAction implements TestCase.LocalAction.
+func (FilterOutputInvertDestination) LocalAction(ip net.IP) error {
+	return listenUDP(acceptPort, sendloopDuration)
 }

@@ -46,6 +46,7 @@ type tasksInode struct {
 	kernfs.InodeDirectoryNoNewChildren
 	kernfs.InodeAttrs
 	kernfs.OrderedChildren
+	kernfs.AlwaysValid
 
 	inoGen InoGenerator
 	pidns  *kernel.PIDNamespace
@@ -66,23 +67,23 @@ var _ kernfs.Inode = (*tasksInode)(nil)
 func newTasksInode(inoGen InoGenerator, k *kernel.Kernel, pidns *kernel.PIDNamespace, cgroupControllers map[string]string) (*tasksInode, *kernfs.Dentry) {
 	root := auth.NewRootCredentials(pidns.UserNamespace())
 	contents := map[string]*kernfs.Dentry{
-		"cpuinfo": newDentry(root, inoGen.NextIno(), 0444, newStaticFile(cpuInfoData(k))),
-		//"filesystems": newDentry(root, inoGen.NextIno(), 0444, &filesystemsData{}),
-		"loadavg": newDentry(root, inoGen.NextIno(), 0444, &loadavgData{}),
-		"sys":     newSysDir(root, inoGen, k),
-		"meminfo": newDentry(root, inoGen.NextIno(), 0444, &meminfoData{}),
-		"mounts":  kernfs.NewStaticSymlink(root, inoGen.NextIno(), "self/mounts"),
-		"net":     newNetDir(root, inoGen, k),
-		"stat":    newDentry(root, inoGen.NextIno(), 0444, &statData{k: k}),
-		"uptime":  newDentry(root, inoGen.NextIno(), 0444, &uptimeData{}),
-		"version": newDentry(root, inoGen.NextIno(), 0444, &versionData{k: k}),
+		"cpuinfo":     newDentry(root, inoGen.NextIno(), 0444, newStaticFileSetStat(cpuInfoData(k))),
+		"filesystems": newDentry(root, inoGen.NextIno(), 0444, &filesystemsData{}),
+		"loadavg":     newDentry(root, inoGen.NextIno(), 0444, &loadavgData{}),
+		"sys":         newSysDir(root, inoGen, k),
+		"meminfo":     newDentry(root, inoGen.NextIno(), 0444, &meminfoData{}),
+		"mounts":      kernfs.NewStaticSymlink(root, inoGen.NextIno(), "self/mounts"),
+		"net":         kernfs.NewStaticSymlink(root, inoGen.NextIno(), "self/net"),
+		"stat":        newDentry(root, inoGen.NextIno(), 0444, &statData{}),
+		"uptime":      newDentry(root, inoGen.NextIno(), 0444, &uptimeData{}),
+		"version":     newDentry(root, inoGen.NextIno(), 0444, &versionData{}),
 	}
 
 	inode := &tasksInode{
 		pidns:             pidns,
 		inoGen:            inoGen,
-		selfSymlink:       newSelfSymlink(root, inoGen.NextIno(), 0444, pidns).VFSDentry(),
-		threadSelfSymlink: newThreadSelfSymlink(root, inoGen.NextIno(), 0444, pidns).VFSDentry(),
+		selfSymlink:       newSelfSymlink(root, inoGen.NextIno(), pidns).VFSDentry(),
+		threadSelfSymlink: newThreadSelfSymlink(root, inoGen.NextIno(), pidns).VFSDentry(),
 		cgroupControllers: cgroupControllers,
 	}
 	inode.InodeAttrs.Init(root, inoGen.NextIno(), linux.ModeDirectory|0555)
@@ -119,11 +120,6 @@ func (i *tasksInode) Lookup(ctx context.Context, name string) (*vfs.Dentry, erro
 
 	taskDentry := newTaskInode(i.inoGen, task, i.pidns, true, i.cgroupControllers)
 	return taskDentry.VFSDentry(), nil
-}
-
-// Valid implements kernfs.inodeDynamicLookup.
-func (i *tasksInode) Valid(ctx context.Context) bool {
-	return true
 }
 
 // IterDirents implements kernfs.inodeDynamicLookup.
@@ -211,17 +207,36 @@ func (i *tasksInode) Open(rp *vfs.ResolvingPath, vfsd *vfs.Dentry, opts vfs.Open
 	return fd.VFSFileDescription(), nil
 }
 
-func (i *tasksInode) Stat(vsfs *vfs.Filesystem) linux.Statx {
-	stat := i.InodeAttrs.Stat(vsfs)
+func (i *tasksInode) Stat(vsfs *vfs.Filesystem, opts vfs.StatOptions) (linux.Statx, error) {
+	stat, err := i.InodeAttrs.Stat(vsfs, opts)
+	if err != nil {
+		return linux.Statx{}, err
+	}
 
-	// Add dynamic children to link count.
-	for _, tg := range i.pidns.ThreadGroups() {
-		if leader := tg.Leader(); leader != nil {
-			stat.Nlink++
+	if opts.Mask&linux.STATX_NLINK != 0 {
+		// Add dynamic children to link count.
+		for _, tg := range i.pidns.ThreadGroups() {
+			if leader := tg.Leader(); leader != nil {
+				stat.Nlink++
+			}
 		}
 	}
 
-	return stat
+	return stat, nil
+}
+
+// staticFileSetStat implements a special static file that allows inode
+// attributes to be set. This is to support /proc files that are readonly, but
+// allow attributes to be set.
+type staticFileSetStat struct {
+	dynamicBytesFileSetAttr
+	vfs.StaticData
+}
+
+var _ dynamicInode = (*staticFileSetStat)(nil)
+
+func newStaticFileSetStat(data string) *staticFileSetStat {
+	return &staticFileSetStat{StaticData: vfs.StaticData{Data: data}}
 }
 
 func cpuInfoData(k *kernel.Kernel) string {

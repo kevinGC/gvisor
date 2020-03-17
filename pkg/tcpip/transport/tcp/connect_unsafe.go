@@ -12,28 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef GVISOR_TEST_SYSCALLS_TEMP_UMASK_H_
-#define GVISOR_TEST_SYSCALLS_TEMP_UMASK_H_
+package tcp
 
-#include <sys/stat.h>
-#include <sys/types.h>
+import (
+	"reflect"
+	"unsafe"
+)
 
-namespace gvisor {
-namespace testing {
-
-class TempUmask {
- public:
-  // Sets the process umask to `mask`.
-  explicit TempUmask(mode_t mask) : old_mask_(umask(mask)) {}
-
-  // Sets the process umask to its previous value.
-  ~TempUmask() { umask(old_mask_); }
-
- private:
-  mode_t old_mask_;
-};
-
-}  // namespace testing
-}  // namespace gvisor
-
-#endif  // GVISOR_TEST_SYSCALLS_TEMP_UMASK_H_
+// optionsToArray converts a slice of capacity >-= maxOptionSize to an array.
+//
+// optionsToArray panics if the capacity of options is smaller than
+// maxOptionSize.
+func optionsToArray(options []byte) *[maxOptionSize]byte {
+	// Reslice to full capacity.
+	options = options[0:maxOptionSize]
+	return (*[maxOptionSize]byte)(unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&options)).Data))
+}

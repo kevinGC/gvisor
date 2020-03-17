@@ -191,24 +191,28 @@ func TestFilterInputDropOnlyUDP(t *testing.T) {
 }
 
 func TestNATRedirectUDPPort(t *testing.T) {
+	t.Skip("NAT isn't supported yet (gvisor.dev/issue/170).")
 	if err := singleTest(NATRedirectUDPPort{}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestNATRedirectTCPPort(t *testing.T) {
+	t.Skip("NAT isn't supported yet (gvisor.dev/issue/170).")
 	if err := singleTest(NATRedirectTCPPort{}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestNATDropUDP(t *testing.T) {
+	t.Skip("NAT isn't supported yet (gvisor.dev/issue/170).")
 	if err := singleTest(NATDropUDP{}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestNATAcceptAll(t *testing.T) {
+	t.Skip("NAT isn't supported yet (gvisor.dev/issue/170).")
 	if err := singleTest(NATAcceptAll{}); err != nil {
 		t.Fatal(err)
 	}
@@ -251,12 +255,14 @@ func TestFilterInputReturnUnderflow(t *testing.T) {
 }
 
 func TestFilterOutputDropTCPDestPort(t *testing.T) {
+	t.Skip("filter OUTPUT isn't supported yet (gvisor.dev/issue/170).")
 	if err := singleTest(FilterOutputDropTCPDestPort{}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestFilterOutputDropTCPSrcPort(t *testing.T) {
+	t.Skip("filter OUTPUT isn't supported yet (gvisor.dev/issue/170).")
 	if err := singleTest(FilterOutputDropTCPSrcPort{}); err != nil {
 		t.Fatal(err)
 	}
@@ -324,6 +330,72 @@ func TestJumpBuiltin(t *testing.T) {
 
 func TestJumpTwice(t *testing.T) {
 	if err := singleTest(FilterInputJumpTwice{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInputDestination(t *testing.T) {
+	if err := singleTest(FilterInputDestination{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInputInvertDestination(t *testing.T) {
+	if err := singleTest(FilterInputInvertDestination{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOutputDestination(t *testing.T) {
+	if err := singleTest(FilterOutputDestination{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOutputInvertDestination(t *testing.T) {
+	if err := singleTest(FilterOutputInvertDestination{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNATOutRedirectIP(t *testing.T) {
+	if err := singleTest(NATOutRedirectIP{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNATOutDontRedirectIP(t *testing.T) {
+	if err := singleTest(NATOutDontRedirectIP{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNATOutRedirectInvert(t *testing.T) {
+	if err := singleTest(NATOutRedirectInvert{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNATPreRedirectIP(t *testing.T) {
+	if err := singleTest(NATPreRedirectIP{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNATPreDontRedirectIP(t *testing.T) {
+	if err := singleTest(NATPreDontRedirectIP{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNATPreRedirectInvert(t *testing.T) {
+	if err := singleTest(NATPreRedirectInvert{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNATRedirectRequiresProtocol(t *testing.T) {
+	if err := singleTest(NATRedirectRequiresProtocol{}); err != nil {
 		t.Fatal(err)
 	}
 }

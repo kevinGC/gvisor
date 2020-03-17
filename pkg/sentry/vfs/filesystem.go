@@ -20,6 +20,7 @@ import (
 	"gvisor.dev/gvisor/pkg/abi/linux"
 	"gvisor.dev/gvisor/pkg/context"
 	"gvisor.dev/gvisor/pkg/fspath"
+	"gvisor.dev/gvisor/pkg/sentry/kernel/auth"
 )
 
 // A Filesystem is a tree of nodes represented by Dentries, which forms part of
@@ -143,6 +144,9 @@ type FilesystemImpl interface {
 	// Sync "causes all pending modifications to filesystem metadata and cached
 	// file data to be written to the underlying [filesystem]", as by syncfs(2).
 	Sync(ctx context.Context) error
+
+	// AccessAt checks whether a user with creds can access the file at rp.
+	AccessAt(ctx context.Context, rp *ResolvingPath, creds *auth.Credentials, ats AccessTypes) error
 
 	// GetDentryAt returns a Dentry representing the file at rp. A reference is
 	// taken on the returned Dentry.
@@ -362,7 +366,9 @@ type FilesystemImpl interface {
 	// ResolvingPath.Resolve*(), then !rp.Done().
 	RmdirAt(ctx context.Context, rp *ResolvingPath) error
 
-	// SetStatAt updates metadata for the file at the given path.
+	// SetStatAt updates metadata for the file at the given path. Implementations
+	// are responsible for checking if the operation can be performed
+	// (see vfs.CheckSetStat() for common checks).
 	//
 	// Errors:
 	//

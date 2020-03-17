@@ -462,6 +462,10 @@ type Stack struct {
 	// opaqueIIDOpts hold the options for generating opaque interface identifiers
 	// (IIDs) as outlined by RFC 7217.
 	opaqueIIDOpts OpaqueInterfaceIdentifierOptions
+
+	// forwarder holds the packets that wait for their link-address resolutions
+	// to complete, and forwards them when each resolution is done.
+	forwarder *forwardQueue
 }
 
 // UniqueID is an abstract generator of unique identifiers.
@@ -551,11 +555,13 @@ type TransportEndpointInfo struct {
 	RegisterNICID tcpip.NICID
 }
 
-// AddrNetProto unwraps the specified address if it is a V4-mapped V6 address
-// and returns the network protocol number to be used to communicate with the
-// specified address. It returns an error if the passed address is incompatible
-// with the receiver.
-func (e *TransportEndpointInfo) AddrNetProto(addr tcpip.FullAddress, v6only bool) (tcpip.FullAddress, tcpip.NetworkProtocolNumber, *tcpip.Error) {
+// AddrNetProtoLocked unwraps the specified address if it is a V4-mapped V6
+// address and returns the network protocol number to be used to communicate
+// with the specified address. It returns an error if the passed address is
+// incompatible with the receiver.
+//
+// Preconditon: the parent endpoint mu must be held while calling this method.
+func (e *TransportEndpointInfo) AddrNetProtoLocked(addr tcpip.FullAddress, v6only bool) (tcpip.FullAddress, tcpip.NetworkProtocolNumber, *tcpip.Error) {
 	netProto := e.NetProto
 	switch len(addr.Addr) {
 	case header.IPv4AddressSize:
@@ -639,6 +645,7 @@ func New(opts Options) *Stack {
 		uniqueIDGenerator:    opts.UniqueID,
 		ndpDisp:              opts.NDPDisp,
 		opaqueIIDOpts:        opts.OpaqueIIDOpts,
+		forwarder:            newForwardQueue(),
 	}
 
 	// Add specified network protocols.

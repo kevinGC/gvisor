@@ -77,7 +77,8 @@ type endpoint struct {
 	sndBufSize int
 	closed     bool
 	stats      tcpip.TransportEndpointStats `state:"nosave"`
-
+  bound      bool
+  
 	// task is the context to get uid and gid of the packet.
 	task *kernel.Task
 }
@@ -129,6 +130,7 @@ func (ep *endpoint) Close() {
 	}
 
 	ep.closed = true
+	ep.bound = false
 	ep.waiterQueue.Notify(waiter.EventHUp | waiter.EventErr | waiter.EventIn | waiter.EventOut)
 }
 
@@ -220,7 +222,24 @@ func (ep *endpoint) Bind(addr tcpip.FullAddress) *tcpip.Error {
 	// sll_family (should be AF_PACKET), sll_protocol, and sll_ifindex."
 	// - packet(7).
 
-	return tcpip.ErrNotSupported
+	ep.mu.Lock()
+	defer ep.mu.Unlock()
+
+	if ep.bound {
+		return tcpip.ErrAlreadyBound
+	}
+
+	// Unregister endpoint with all the nics.
+	ep.stack.UnregisterPacketEndpoint(0, ep.netProto, ep)
+
+	// Bind endpoint to receive packets from specific interface.
+	if err := ep.stack.RegisterPacketEndpoint(addr.NIC, ep.netProto, ep); err != nil {
+		return err
+	}
+
+	ep.bound = true
+
+	return nil
 }
 
 // GetLocalAddress implements tcpip.Endpoint.GetLocalAddress.

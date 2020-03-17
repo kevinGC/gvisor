@@ -124,23 +124,6 @@ func procListsEqual(got, want []*control.Process) (bool, error) {
 	return true, nil
 }
 
-// getAndCheckProcLists is similar to waitForProcessList, but does not wait and retry the
-// test for equality. This is because we already confirmed that exec occurred.
-func getAndCheckProcLists(cont *Container, want []*control.Process) error {
-	got, err := cont.Processes()
-	if err != nil {
-		return fmt.Errorf("error getting process data from container: %v", err)
-	}
-	equal, err := procListsEqual(got, want)
-	if err != nil {
-		return err
-	}
-	if equal {
-		return nil
-	}
-	return fmt.Errorf("container got process list: %s, want: %s", procListToString(got), procListToString(want))
-}
-
 func procListToString(pl []*control.Process) string {
 	strs := make([]string, 0, len(pl))
 	for _, p := range pl {
@@ -2092,7 +2075,7 @@ func TestOverlayfsStaleRead(t *testing.T) {
 	defer out.Close()
 
 	const want = "foobar"
-	cmd := fmt.Sprintf("cat %q && echo %q> %q && cp %q %q", in.Name(), want, in.Name(), in.Name(), out.Name())
+	cmd := fmt.Sprintf("cat %q >&2 && echo %q> %q && cp %q %q", in.Name(), want, in.Name(), in.Name(), out.Name())
 	spec := testutil.NewSpecWithArgs("/bin/bash", "-c", cmd)
 	if err := run(spec, conf); err != nil {
 		t.Fatalf("Error running container: %v", err)

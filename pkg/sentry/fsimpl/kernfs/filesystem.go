@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// This file implements vfs.FilesystemImpl for kernfs.
-
 package kernfs
+
+// This file implements vfs.FilesystemImpl for kernfs.
 
 import (
 	"fmt"
@@ -22,6 +22,7 @@ import (
 	"gvisor.dev/gvisor/pkg/abi/linux"
 	"gvisor.dev/gvisor/pkg/context"
 	"gvisor.dev/gvisor/pkg/fspath"
+	"gvisor.dev/gvisor/pkg/sentry/kernel/auth"
 	"gvisor.dev/gvisor/pkg/sentry/vfs"
 	"gvisor.dev/gvisor/pkg/syserror"
 )
@@ -227,6 +228,19 @@ func (fs *Filesystem) Release() {
 func (fs *Filesystem) Sync(ctx context.Context) error {
 	// All filesystem state is in-memory.
 	return nil
+}
+
+// AccessAt implements vfs.Filesystem.Impl.AccessAt.
+func (fs *Filesystem) AccessAt(ctx context.Context, rp *vfs.ResolvingPath, creds *auth.Credentials, ats vfs.AccessTypes) error {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	defer fs.processDeferredDecRefs()
+
+	_, inode, err := fs.walkExistingLocked(ctx, rp)
+	if err != nil {
+		return err
+	}
+	return inode.CheckPermissions(ctx, creds, ats)
 }
 
 // GetDentryAt implements vfs.FilesystemImpl.GetDentryAt.
@@ -622,7 +636,7 @@ func (fs *Filesystem) SetStatAt(ctx context.Context, rp *vfs.ResolvingPath, opts
 	if opts.Stat.Mask == 0 {
 		return nil
 	}
-	return inode.SetStat(fs.VFSFilesystem(), opts)
+	return inode.SetStat(ctx, fs.VFSFilesystem(), rp.Credentials(), opts)
 }
 
 // StatAt implements vfs.FilesystemImpl.StatAt.
@@ -634,7 +648,7 @@ func (fs *Filesystem) StatAt(ctx context.Context, rp *vfs.ResolvingPath, opts vf
 	if err != nil {
 		return linux.Statx{}, err
 	}
-	return inode.Stat(fs.VFSFilesystem()), nil
+	return inode.Stat(fs.VFSFilesystem(), opts)
 }
 
 // StatFSAt implements vfs.FilesystemImpl.StatFSAt.

@@ -22,6 +22,7 @@ import (
 	"gvisor.dev/gvisor/pkg/context"
 	"gvisor.dev/gvisor/pkg/sentry/fsimpl/kernfs"
 	"gvisor.dev/gvisor/pkg/sentry/kernel"
+	"gvisor.dev/gvisor/pkg/sentry/kernel/auth"
 	"gvisor.dev/gvisor/pkg/sentry/vfs"
 	"gvisor.dev/gvisor/pkg/syserror"
 )
@@ -34,6 +35,7 @@ type subtasksInode struct {
 	kernfs.InodeDirectoryNoNewChildren
 	kernfs.InodeAttrs
 	kernfs.OrderedChildren
+	kernfs.AlwaysValid
 
 	task              *kernel.Task
 	pidns             *kernel.PIDNamespace
@@ -59,11 +61,6 @@ func newSubtasks(task *kernel.Task, pidns *kernel.PIDNamespace, inoGen InoGenera
 	dentry.Init(inode)
 
 	return dentry
-}
-
-// Valid implements kernfs.inodeDynamicLookup.
-func (i *subtasksInode) Valid(ctx context.Context) bool {
-	return true
 }
 
 // Lookup implements kernfs.inodeDynamicLookup.
@@ -121,8 +118,18 @@ func (i *subtasksInode) Open(rp *vfs.ResolvingPath, vfsd *vfs.Dentry, opts vfs.O
 }
 
 // Stat implements kernfs.Inode.
-func (i *subtasksInode) Stat(vsfs *vfs.Filesystem) linux.Statx {
-	stat := i.InodeAttrs.Stat(vsfs)
-	stat.Nlink += uint32(i.task.ThreadGroup().Count())
-	return stat
+func (i *subtasksInode) Stat(vsfs *vfs.Filesystem, opts vfs.StatOptions) (linux.Statx, error) {
+	stat, err := i.InodeAttrs.Stat(vsfs, opts)
+	if err != nil {
+		return linux.Statx{}, err
+	}
+	if opts.Mask&linux.STATX_NLINK != 0 {
+		stat.Nlink += uint32(i.task.ThreadGroup().Count())
+	}
+	return stat, nil
+}
+
+// SetStat implements Inode.SetStat not allowing inode attributes to be changed.
+func (*subtasksInode) SetStat(context.Context, *vfs.Filesystem, *auth.Credentials, vfs.SetStatOptions) error {
+	return syserror.EPERM
 }

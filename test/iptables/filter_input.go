@@ -47,6 +47,8 @@ func init() {
 	RegisterTestCase(FilterInputJumpReturnDrop{})
 	RegisterTestCase(FilterInputJumpBuiltin{})
 	RegisterTestCase(FilterInputJumpTwice{})
+	RegisterTestCase(FilterInputDestination{})
+	RegisterTestCase(FilterInputInvertDestination{})
 }
 
 // FilterInputDropUDP tests that we can drop UDP traffic.
@@ -106,7 +108,7 @@ func (FilterInputDropOnlyUDP) ContainerAction(ip net.IP) error {
 func (FilterInputDropOnlyUDP) LocalAction(ip net.IP) error {
 	// Try to establish a TCP connection with the container, which should
 	// succeed.
-	return connectTCP(ip, acceptPort, dropPort, sendloopDuration)
+	return connectTCP(ip, acceptPort, sendloopDuration)
 }
 
 // FilterInputDropUDPPort tests that we can drop UDP traffic by port.
@@ -192,7 +194,7 @@ func (FilterInputDropTCPDestPort) ContainerAction(ip net.IP) error {
 
 // LocalAction implements TestCase.LocalAction.
 func (FilterInputDropTCPDestPort) LocalAction(ip net.IP) error {
-	if err := connectTCP(ip, dropPort, acceptPort, sendloopDuration); err == nil {
+	if err := connectTCP(ip, dropPort, sendloopDuration); err == nil {
 		return fmt.Errorf("connection destined to port %d should not be accepted, but got accepted", dropPort)
 	}
 
@@ -209,13 +211,14 @@ func (FilterInputDropTCPSrcPort) Name() string {
 
 // ContainerAction implements TestCase.ContainerAction.
 func (FilterInputDropTCPSrcPort) ContainerAction(ip net.IP) error {
-	if err := filterTable("-A", "INPUT", "-p", "tcp", "-m", "tcp", "--sport", fmt.Sprintf("%d", dropPort), "-j", "DROP"); err != nil {
+	// Drop anything from an ephemeral port.
+	if err := filterTable("-A", "INPUT", "-p", "tcp", "-m", "tcp", "--sport", "1024:65535", "-j", "DROP"); err != nil {
 		return err
 	}
 
 	// Listen for TCP packets on accept port.
 	if err := listenTCP(acceptPort, sendloopDuration); err == nil {
-		return fmt.Errorf("connection destined to port %d should not be accepted, but got accepted", dropPort)
+		return fmt.Errorf("connection destined to port %d should not be accepted, but was", dropPort)
 	}
 
 	return nil
@@ -223,8 +226,8 @@ func (FilterInputDropTCPSrcPort) ContainerAction(ip net.IP) error {
 
 // LocalAction implements TestCase.LocalAction.
 func (FilterInputDropTCPSrcPort) LocalAction(ip net.IP) error {
-	if err := connectTCP(ip, acceptPort, dropPort, sendloopDuration); err == nil {
-		return fmt.Errorf("connection on port %d should not be acceptedi, but got accepted", dropPort)
+	if err := connectTCP(ip, acceptPort, sendloopDuration); err == nil {
+		return fmt.Errorf("connection should not be accepted, but was")
 	}
 
 	return nil
@@ -593,5 +596,68 @@ func (FilterInputJumpTwice) ContainerAction(ip net.IP) error {
 
 // LocalAction implements TestCase.LocalAction.
 func (FilterInputJumpTwice) LocalAction(ip net.IP) error {
+	return sendUDPLoop(ip, acceptPort, sendloopDuration)
+}
+
+// FilterInputDestination verifies that we can filter packets via `-d
+// <ipaddr>`.
+type FilterInputDestination struct{}
+
+// Name implements TestCase.Name.
+func (FilterInputDestination) Name() string {
+	return "FilterInputDestination"
+}
+
+// ContainerAction implements TestCase.ContainerAction.
+func (FilterInputDestination) ContainerAction(ip net.IP) error {
+	addrs, err := localAddrs()
+	if err != nil {
+		return err
+	}
+
+	// Make INPUT's default action DROP, then ACCEPT all packets bound for
+	// this machine.
+	rules := [][]string{{"-P", "INPUT", "DROP"}}
+	for _, addr := range addrs {
+		rules = append(rules, []string{"-A", "INPUT", "-d", addr, "-j", "ACCEPT"})
+	}
+	if err := filterTableRules(rules); err != nil {
+		return err
+	}
+
+	return listenUDP(acceptPort, sendloopDuration)
+}
+
+// LocalAction implements TestCase.LocalAction.
+func (FilterInputDestination) LocalAction(ip net.IP) error {
+	return sendUDPLoop(ip, acceptPort, sendloopDuration)
+}
+
+// FilterInputInvertDestination verifies that we can filter packets via `! -d
+// <ipaddr>`.
+type FilterInputInvertDestination struct{}
+
+// Name implements TestCase.Name.
+func (FilterInputInvertDestination) Name() string {
+	return "FilterInputInvertDestination"
+}
+
+// ContainerAction implements TestCase.ContainerAction.
+func (FilterInputInvertDestination) ContainerAction(ip net.IP) error {
+	// Make INPUT's default action DROP, then ACCEPT all packets not bound
+	// for 127.0.0.1.
+	rules := [][]string{
+		{"-P", "INPUT", "DROP"},
+		{"-A", "INPUT", "!", "-d", localIP, "-j", "ACCEPT"},
+	}
+	if err := filterTableRules(rules); err != nil {
+		return err
+	}
+
+	return listenUDP(acceptPort, sendloopDuration)
+}
+
+// LocalAction implements TestCase.LocalAction.
+func (FilterInputInvertDestination) LocalAction(ip net.IP) error {
 	return sendUDPLoop(ip, acceptPort, sendloopDuration)
 }

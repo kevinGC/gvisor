@@ -407,7 +407,6 @@ func (e *endpoint) WritePacket(r *stack.Route, gso *stack.GSO, protocol tcpip.Ne
 
 	if e.Capabilities()&stack.CapabilityHardwareGSO != 0 {
 		vnetHdr := virtioNetHdr{}
-		vnetHdrBuf := vnetHdrToByteSlice(&vnetHdr)
 		if gso != nil {
 			vnetHdr.hdrLen = uint16(pkt.Header.UsedLength())
 			if gso.NeedsCsum {
@@ -428,6 +427,7 @@ func (e *endpoint) WritePacket(r *stack.Route, gso *stack.GSO, protocol tcpip.Ne
 			}
 		}
 
+		vnetHdrBuf := vnetHdrToByteSlice(&vnetHdr)
 		return rawfile.NonBlockingWrite3(e.fds[0], vnetHdrBuf, pkt.Header.View(), pkt.Data.ToView())
 	}
 
@@ -467,7 +467,7 @@ func (e *endpoint) WritePackets(r *stack.Route, gso *stack.GSO, pkts []tcpip.Pac
 
 	views := pkts[0].Data.Views()
 	/*
-	 * Each bondary in views can add one more iovec.
+	 * Each boundary in views can add one more iovec.
 	 *
 	 * payload |      |          |         |
 	 *         -----------------------------

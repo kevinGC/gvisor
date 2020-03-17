@@ -713,7 +713,7 @@ func (d *dentry) setStat(ctx context.Context, creds *auth.Credentials, stat *lin
 	if stat.Mask&^(linux.STATX_MODE|linux.STATX_UID|linux.STATX_GID|linux.STATX_ATIME|linux.STATX_MTIME|linux.STATX_SIZE) != 0 {
 		return syserror.EPERM
 	}
-	if err := vfs.CheckSetStat(creds, stat, uint16(atomic.LoadUint32(&d.mode))&^linux.S_IFMT, auth.KUID(atomic.LoadUint32(&d.uid)), auth.KGID(atomic.LoadUint32(&d.gid))); err != nil {
+	if err := vfs.CheckSetStat(ctx, creds, stat, uint16(atomic.LoadUint32(&d.mode))&^linux.S_IFMT, auth.KUID(atomic.LoadUint32(&d.uid)), auth.KGID(atomic.LoadUint32(&d.gid))); err != nil {
 		return err
 	}
 	if err := mnt.CheckBeginWrite(); err != nil {
@@ -1045,13 +1045,13 @@ func (d *dentry) ensureSharedHandle(ctx context.Context, read, write, trunc bool
 				// using the old file descriptor, preventing us from safely
 				// closing it. We could handle this by invalidating existing
 				// memmap.Translations, but this is expensive. Instead, use
-				// dup2() to make the old file descriptor refer to the new file
+				// dup3 to make the old file descriptor refer to the new file
 				// description, then close the new file descriptor (which is no
 				// longer needed). Racing callers may use the old or new file
 				// description, but this doesn't matter since they refer to the
 				// same file (unless d.fs.opts.overlayfsStaleRead is true,
 				// which we handle separately).
-				if err := syscall.Dup2(int(h.fd), int(d.handle.fd)); err != nil {
+				if err := syscall.Dup3(int(h.fd), int(d.handle.fd), 0); err != nil {
 					d.handleMu.Unlock()
 					ctx.Warningf("gofer.dentry.ensureSharedHandle: failed to dup fd %d to fd %d: %v", h.fd, d.handle.fd, err)
 					h.close(ctx)

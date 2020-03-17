@@ -36,20 +36,20 @@ type InodeNoopRefCount struct {
 }
 
 // IncRef implements Inode.IncRef.
-func (n *InodeNoopRefCount) IncRef() {
+func (InodeNoopRefCount) IncRef() {
 }
 
 // DecRef implements Inode.DecRef.
-func (n *InodeNoopRefCount) DecRef() {
+func (InodeNoopRefCount) DecRef() {
 }
 
 // TryIncRef implements Inode.TryIncRef.
-func (n *InodeNoopRefCount) TryIncRef() bool {
+func (InodeNoopRefCount) TryIncRef() bool {
 	return true
 }
 
 // Destroy implements Inode.Destroy.
-func (n *InodeNoopRefCount) Destroy() {
+func (InodeNoopRefCount) Destroy() {
 }
 
 // InodeDirectoryNoNewChildren partially implements the Inode interface.
@@ -58,27 +58,27 @@ func (n *InodeNoopRefCount) Destroy() {
 type InodeDirectoryNoNewChildren struct{}
 
 // NewFile implements Inode.NewFile.
-func (*InodeDirectoryNoNewChildren) NewFile(context.Context, string, vfs.OpenOptions) (*vfs.Dentry, error) {
+func (InodeDirectoryNoNewChildren) NewFile(context.Context, string, vfs.OpenOptions) (*vfs.Dentry, error) {
 	return nil, syserror.EPERM
 }
 
 // NewDir implements Inode.NewDir.
-func (*InodeDirectoryNoNewChildren) NewDir(context.Context, string, vfs.MkdirOptions) (*vfs.Dentry, error) {
+func (InodeDirectoryNoNewChildren) NewDir(context.Context, string, vfs.MkdirOptions) (*vfs.Dentry, error) {
 	return nil, syserror.EPERM
 }
 
 // NewLink implements Inode.NewLink.
-func (*InodeDirectoryNoNewChildren) NewLink(context.Context, string, Inode) (*vfs.Dentry, error) {
+func (InodeDirectoryNoNewChildren) NewLink(context.Context, string, Inode) (*vfs.Dentry, error) {
 	return nil, syserror.EPERM
 }
 
 // NewSymlink implements Inode.NewSymlink.
-func (*InodeDirectoryNoNewChildren) NewSymlink(context.Context, string, string) (*vfs.Dentry, error) {
+func (InodeDirectoryNoNewChildren) NewSymlink(context.Context, string, string) (*vfs.Dentry, error) {
 	return nil, syserror.EPERM
 }
 
 // NewNode implements Inode.NewNode.
-func (*InodeDirectoryNoNewChildren) NewNode(context.Context, string, vfs.MknodOptions) (*vfs.Dentry, error) {
+func (InodeDirectoryNoNewChildren) NewNode(context.Context, string, vfs.MknodOptions) (*vfs.Dentry, error) {
 	return nil, syserror.EPERM
 }
 
@@ -90,62 +90,62 @@ type InodeNotDirectory struct {
 }
 
 // HasChildren implements Inode.HasChildren.
-func (*InodeNotDirectory) HasChildren() bool {
+func (InodeNotDirectory) HasChildren() bool {
 	return false
 }
 
 // NewFile implements Inode.NewFile.
-func (*InodeNotDirectory) NewFile(context.Context, string, vfs.OpenOptions) (*vfs.Dentry, error) {
+func (InodeNotDirectory) NewFile(context.Context, string, vfs.OpenOptions) (*vfs.Dentry, error) {
 	panic("NewFile called on non-directory inode")
 }
 
 // NewDir implements Inode.NewDir.
-func (*InodeNotDirectory) NewDir(context.Context, string, vfs.MkdirOptions) (*vfs.Dentry, error) {
+func (InodeNotDirectory) NewDir(context.Context, string, vfs.MkdirOptions) (*vfs.Dentry, error) {
 	panic("NewDir called on non-directory inode")
 }
 
 // NewLink implements Inode.NewLinkink.
-func (*InodeNotDirectory) NewLink(context.Context, string, Inode) (*vfs.Dentry, error) {
+func (InodeNotDirectory) NewLink(context.Context, string, Inode) (*vfs.Dentry, error) {
 	panic("NewLink called on non-directory inode")
 }
 
 // NewSymlink implements Inode.NewSymlink.
-func (*InodeNotDirectory) NewSymlink(context.Context, string, string) (*vfs.Dentry, error) {
+func (InodeNotDirectory) NewSymlink(context.Context, string, string) (*vfs.Dentry, error) {
 	panic("NewSymlink called on non-directory inode")
 }
 
 // NewNode implements Inode.NewNode.
-func (*InodeNotDirectory) NewNode(context.Context, string, vfs.MknodOptions) (*vfs.Dentry, error) {
+func (InodeNotDirectory) NewNode(context.Context, string, vfs.MknodOptions) (*vfs.Dentry, error) {
 	panic("NewNode called on non-directory inode")
 }
 
 // Unlink implements Inode.Unlink.
-func (*InodeNotDirectory) Unlink(context.Context, string, *vfs.Dentry) error {
+func (InodeNotDirectory) Unlink(context.Context, string, *vfs.Dentry) error {
 	panic("Unlink called on non-directory inode")
 }
 
 // RmDir implements Inode.RmDir.
-func (*InodeNotDirectory) RmDir(context.Context, string, *vfs.Dentry) error {
+func (InodeNotDirectory) RmDir(context.Context, string, *vfs.Dentry) error {
 	panic("RmDir called on non-directory inode")
 }
 
 // Rename implements Inode.Rename.
-func (*InodeNotDirectory) Rename(context.Context, string, string, *vfs.Dentry, *vfs.Dentry) (*vfs.Dentry, error) {
+func (InodeNotDirectory) Rename(context.Context, string, string, *vfs.Dentry, *vfs.Dentry) (*vfs.Dentry, error) {
 	panic("Rename called on non-directory inode")
 }
 
 // Lookup implements Inode.Lookup.
-func (*InodeNotDirectory) Lookup(ctx context.Context, name string) (*vfs.Dentry, error) {
+func (InodeNotDirectory) Lookup(ctx context.Context, name string) (*vfs.Dentry, error) {
 	panic("Lookup called on non-directory inode")
 }
 
 // IterDirents implements Inode.IterDirents.
-func (*InodeNotDirectory) IterDirents(ctx context.Context, callback vfs.IterDirentsCallback, offset, relOffset int64) (newOffset int64, err error) {
+func (InodeNotDirectory) IterDirents(ctx context.Context, callback vfs.IterDirentsCallback, offset, relOffset int64) (newOffset int64, err error) {
 	panic("IterDirents called on non-directory inode")
 }
 
 // Valid implements Inode.Valid.
-func (*InodeNotDirectory) Valid(context.Context) bool {
+func (InodeNotDirectory) Valid(context.Context) bool {
 	return true
 }
 
@@ -157,17 +157,17 @@ func (*InodeNotDirectory) Valid(context.Context) bool {
 type InodeNoDynamicLookup struct{}
 
 // Lookup implements Inode.Lookup.
-func (*InodeNoDynamicLookup) Lookup(ctx context.Context, name string) (*vfs.Dentry, error) {
+func (InodeNoDynamicLookup) Lookup(ctx context.Context, name string) (*vfs.Dentry, error) {
 	return nil, syserror.ENOENT
 }
 
 // IterDirents implements Inode.IterDirents.
-func (*InodeNoDynamicLookup) IterDirents(ctx context.Context, callback vfs.IterDirentsCallback, offset, relOffset int64) (int64, error) {
+func (InodeNoDynamicLookup) IterDirents(ctx context.Context, callback vfs.IterDirentsCallback, offset, relOffset int64) (int64, error) {
 	return offset, nil
 }
 
 // Valid implements Inode.Valid.
-func (*InodeNoDynamicLookup) Valid(ctx context.Context) bool {
+func (InodeNoDynamicLookup) Valid(ctx context.Context) bool {
 	return true
 }
 
@@ -177,7 +177,7 @@ func (*InodeNoDynamicLookup) Valid(ctx context.Context) bool {
 type InodeNotSymlink struct{}
 
 // Readlink implements Inode.Readlink.
-func (*InodeNotSymlink) Readlink(context.Context) (string, error) {
+func (InodeNotSymlink) Readlink(context.Context) (string, error) {
 	return "", syserror.EINVAL
 }
 
@@ -219,7 +219,7 @@ func (a *InodeAttrs) Mode() linux.FileMode {
 // Stat partially implements Inode.Stat. Note that this function doesn't provide
 // all the stat fields, and the embedder should consider extending the result
 // with filesystem-specific fields.
-func (a *InodeAttrs) Stat(*vfs.Filesystem) linux.Statx {
+func (a *InodeAttrs) Stat(*vfs.Filesystem, vfs.StatOptions) (linux.Statx, error) {
 	var stat linux.Statx
 	stat.Mask = linux.STATX_TYPE | linux.STATX_MODE | linux.STATX_UID | linux.STATX_GID | linux.STATX_INO | linux.STATX_NLINK
 	stat.Ino = atomic.LoadUint64(&a.ino)
@@ -228,13 +228,23 @@ func (a *InodeAttrs) Stat(*vfs.Filesystem) linux.Statx {
 	stat.GID = atomic.LoadUint32(&a.gid)
 	stat.Nlink = atomic.LoadUint32(&a.nlink)
 
-	// TODO: Implement other stat fields like timestamps.
+	// TODO(gvisor.dev/issue/1193): Implement other stat fields like timestamps.
 
-	return stat
+	return stat, nil
 }
 
 // SetStat implements Inode.SetStat.
-func (a *InodeAttrs) SetStat(_ *vfs.Filesystem, opts vfs.SetStatOptions) error {
+func (a *InodeAttrs) SetStat(ctx context.Context, fs *vfs.Filesystem, creds *auth.Credentials, opts vfs.SetStatOptions) error {
+	if opts.Stat.Mask == 0 {
+		return nil
+	}
+	if opts.Stat.Mask&^(linux.STATX_MODE|linux.STATX_UID|linux.STATX_GID) != 0 {
+		return syserror.EPERM
+	}
+	if err := vfs.CheckSetStat(ctx, creds, &opts.Stat, uint16(a.Mode().Permissions()), auth.KUID(atomic.LoadUint32(&a.uid)), auth.KGID(atomic.LoadUint32(&a.gid))); err != nil {
+		return err
+	}
+
 	stat := opts.Stat
 	if stat.Mask&linux.STATX_MODE != 0 {
 		for {
@@ -256,7 +266,7 @@ func (a *InodeAttrs) SetStat(_ *vfs.Filesystem, opts vfs.SetStatOptions) error {
 	// Note that not all fields are modifiable. For example, the file type and
 	// inode numbers are immutable after node creation.
 
-	// TODO: Implement other stat fields like timestamps.
+	// TODO(gvisor.dev/issue/1193): Implement other stat fields like timestamps.
 
 	return nil
 }
@@ -553,4 +563,17 @@ func (s *StaticDirectory) Open(rp *vfs.ResolvingPath, vfsd *vfs.Dentry, opts vfs
 	fd := &GenericDirectoryFD{}
 	fd.Init(rp.Mount(), vfsd, &s.OrderedChildren, &opts)
 	return fd.VFSFileDescription(), nil
+}
+
+// SetStat implements Inode.SetStat not allowing inode attributes to be changed.
+func (*StaticDirectory) SetStat(context.Context, *vfs.Filesystem, *auth.Credentials, vfs.SetStatOptions) error {
+	return syserror.EPERM
+}
+
+// AlwaysValid partially implements kernfs.inodeDynamicLookup.
+type AlwaysValid struct{}
+
+// Valid implements kernfs.inodeDynamicLookup.
+func (*AlwaysValid) Valid(context.Context) bool {
+	return true
 }

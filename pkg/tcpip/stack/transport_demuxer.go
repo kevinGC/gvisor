@@ -15,9 +15,9 @@
 package stack
 
 import (
+	"container/heap"
 	"fmt"
 	"math/rand"
-	"sort"
 
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -141,16 +141,17 @@ func (epsByNic *endpointsByNic) registerEndpoint(d *transportDemuxer, netProto t
 	epsByNic.mu.Lock()
 	defer epsByNic.mu.Unlock()
 
-	if multiPortEp, ok := epsByNic.endpoints[bindToDevice]; ok {
-		// There was already a bind.
-		return multiPortEp.singleRegisterEndpoint(t, reusePort)
+	multiPortEp, ok := epsByNic.endpoints[bindToDevice]
+	if !ok {
+		multiPortEp = &multiPortEndpoint{
+			demux:      d,
+			netProto:   netProto,
+			transProto: transProto,
+			reuse:      reusePort,
+		}
+		epsByNic.endpoints[bindToDevice] = multiPortEp
 	}
 
-	// This is a new binding.
-	multiPortEp := &multiPortEndpoint{demux: d, netProto: netProto, transProto: transProto}
-	multiPortEp.endpointsMap = make(map[TransportEndpoint]int)
-	multiPortEp.reuse = reusePort
-	epsByNic.endpoints[bindToDevice] = multiPortEp
 	return multiPortEp.singleRegisterEndpoint(t, reusePort)
 }
 
@@ -222,6 +223,35 @@ func (d *transportDemuxer) registerEndpoint(netProtos []tcpip.NetworkProtocolNum
 	return nil
 }
 
+type transportEndpointHeap []TransportEndpoint
+
+var _ heap.Interface = (*transportEndpointHeap)(nil)
+
+func (h *transportEndpointHeap) Len() int {
+	return len(*h)
+}
+
+func (h *transportEndpointHeap) Less(i, j int) bool {
+	return (*h)[i].UniqueID() < (*h)[j].UniqueID()
+}
+
+func (h *transportEndpointHeap) Swap(i, j int) {
+	(*h)[i], (*h)[j] = (*h)[j], (*h)[i]
+}
+
+func (h *transportEndpointHeap) Push(x interface{}) {
+	*h = append(*h, x.(TransportEndpoint))
+}
+
+func (h *transportEndpointHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	old[n-1] = nil
+	*h = old[:n-1]
+	return x
+}
+
 // multiPortEndpoint is a container for TransportEndpoints which are bound to
 // the same pair of address and port. endpointsArr always has at least one
 // element.
@@ -237,15 +267,14 @@ type multiPortEndpoint struct {
 	netProto   tcpip.NetworkProtocolNumber
 	transProto tcpip.TransportProtocolNumber
 
-	endpointsArr []TransportEndpoint
-	endpointsMap map[TransportEndpoint]int
+	endpoints transportEndpointHeap
 	// reuse indicates if more than one endpoint is allowed.
 	reuse bool
 }
 
 func (ep *multiPortEndpoint) transportEndpoints() []TransportEndpoint {
 	ep.mu.RLock()
-	eps := append([]TransportEndpoint(nil), ep.endpointsArr...)
+	eps := append([]TransportEndpoint(nil), ep.endpoints...)
 	ep.mu.RUnlock()
 	return eps
 }
@@ -262,8 +291,8 @@ func reciprocalScale(val, n uint32) uint32 {
 // ports then uses it to select a socket. In this case, all packets from one
 // address will be sent to same endpoint.
 func selectEndpoint(id TransportEndpointID, mpep *multiPortEndpoint, seed uint32) TransportEndpoint {
-	if len(mpep.endpointsArr) == 1 {
-		return mpep.endpointsArr[0]
+	if len(mpep.endpoints) == 1 {
+		return mpep.endpoints[0]
 	}
 
 	payload := []byte{
@@ -279,29 +308,26 @@ func selectEndpoint(id TransportEndpointID, mpep *multiPortEndpoint, seed uint32
 	h.Write([]byte(id.RemoteAddress))
 	hash := h.Sum32()
 
-	idx := reciprocalScale(hash, uint32(len(mpep.endpointsArr)))
-	return mpep.endpointsArr[idx]
+	idx := reciprocalScale(hash, uint32(len(mpep.endpoints)))
+	return mpep.endpoints[idx]
 }
 
 func (ep *multiPortEndpoint) handlePacketAll(r *Route, id TransportEndpointID, pkt tcpip.PacketBuffer) {
 	ep.mu.RLock()
 	queuedProtocol, mustQueue := ep.demux.queuedProtocols[protocolIDs{ep.netProto, ep.transProto}]
-	for i, endpoint := range ep.endpointsArr {
-		// HandlePacket takes ownership of pkt, so each endpoint needs
-		// its own copy except for the final one.
-		if i == len(ep.endpointsArr)-1 {
-			if mustQueue {
-				queuedProtocol.QueuePacket(r, endpoint, id, pkt)
-				break
-			}
-			endpoint.HandlePacket(r, id, pkt)
-			break
-		}
+	// HandlePacket takes ownership of pkt, so each endpoint needs
+	// its own copy except for the final one.
+	for _, endpoint := range ep.endpoints[:len(ep.endpoints)-1] {
 		if mustQueue {
 			queuedProtocol.QueuePacket(r, endpoint, id, pkt.Clone())
-			continue
+		} else {
+			endpoint.HandlePacket(r, id, pkt.Clone())
 		}
-		endpoint.HandlePacket(r, id, pkt.Clone())
+	}
+	if endpoint := ep.endpoints[len(ep.endpoints)-1]; mustQueue {
+		queuedProtocol.QueuePacket(r, endpoint, id, pkt)
+	} else {
+		endpoint.HandlePacket(r, id, pkt)
 	}
 	ep.mu.RUnlock() // Don't use defer for performance reasons.
 }
@@ -312,26 +338,15 @@ func (ep *multiPortEndpoint) singleRegisterEndpoint(t TransportEndpoint, reusePo
 	ep.mu.Lock()
 	defer ep.mu.Unlock()
 
-	if len(ep.endpointsArr) > 0 {
+	if len(ep.endpoints) != 0 {
 		// If it was previously bound, we need to check if we can bind again.
 		if !ep.reuse || !reusePort {
 			return tcpip.ErrPortInUse
 		}
 	}
 
-	// A new endpoint is added into endpointsArr and its index there is saved in
-	// endpointsMap. This will allow us to remove endpoint from the array fast.
-	ep.endpointsMap[t] = len(ep.endpointsArr)
-	ep.endpointsArr = append(ep.endpointsArr, t)
+	heap.Push(&ep.endpoints, t)
 
-	// ep.endpointsArr is sorted by endpoint unique IDs, so that endpoints
-	// can be restored in the same order.
-	sort.Slice(ep.endpointsArr, func(i, j int) bool {
-		return ep.endpointsArr[i].UniqueID() < ep.endpointsArr[j].UniqueID()
-	})
-	for i, e := range ep.endpointsArr {
-		ep.endpointsMap[e] = i
-	}
 	return nil
 }
 
@@ -340,21 +355,13 @@ func (ep *multiPortEndpoint) unregisterEndpoint(t TransportEndpoint) bool {
 	ep.mu.Lock()
 	defer ep.mu.Unlock()
 
-	idx, ok := ep.endpointsMap[t]
-	if !ok {
-		return false
+	for i, endpoint := range ep.endpoints {
+		if endpoint == t {
+			heap.Remove(&ep.endpoints, i)
+			break
+		}
 	}
-	delete(ep.endpointsMap, t)
-	l := len(ep.endpointsArr)
-	if l > 1 {
-		// The last endpoint in endpointsArr is moved instead of the deleted one.
-		lastEp := ep.endpointsArr[l-1]
-		ep.endpointsArr[idx] = lastEp
-		ep.endpointsMap[lastEp] = idx
-		ep.endpointsArr = ep.endpointsArr[0 : l-1]
-		return false
-	}
-	return true
+	return len(ep.endpoints) == 0
 }
 
 func (d *transportDemuxer) singleRegisterEndpoint(netProto tcpip.NetworkProtocolNumber, protocol tcpip.TransportProtocolNumber, id TransportEndpointID, ep TransportEndpoint, reusePort bool, bindToDevice tcpip.NICID) *tcpip.Error {
@@ -371,17 +378,14 @@ func (d *transportDemuxer) singleRegisterEndpoint(netProto tcpip.NetworkProtocol
 	eps.mu.Lock()
 	defer eps.mu.Unlock()
 
-	if epsByNic, ok := eps.endpoints[id]; ok {
-		// There was already a binding.
-		return epsByNic.registerEndpoint(d, netProto, protocol, ep, reusePort, bindToDevice)
+	epsByNic, ok := eps.endpoints[id]
+	if !ok {
+		epsByNic = &endpointsByNic{
+			endpoints: make(map[tcpip.NICID]*multiPortEndpoint),
+			seed:      rand.Uint32(),
+		}
+		eps.endpoints[id] = epsByNic
 	}
-
-	// This is a new binding.
-	epsByNic := &endpointsByNic{
-		endpoints: make(map[tcpip.NICID]*multiPortEndpoint),
-		seed:      rand.Uint32(),
-	}
-	eps.endpoints[id] = epsByNic
 
 	return epsByNic.registerEndpoint(d, netProto, protocol, ep, reusePort, bindToDevice)
 }
@@ -396,14 +400,6 @@ func (d *transportDemuxer) unregisterEndpoint(netProtos []tcpip.NetworkProtocolN
 	}
 }
 
-var loopbackSubnet = func() tcpip.Subnet {
-	sn, err := tcpip.NewSubnet("\x7f\x00\x00\x00", "\xff\x00\x00\x00")
-	if err != nil {
-		panic(err)
-	}
-	return sn
-}()
-
 // deliverPacket attempts to find one or more matching transport endpoints, and
 // then, if matches are found, delivers the packet to them. Returns true if
 // the packet no longer needs to be handled.
@@ -413,61 +409,45 @@ func (d *transportDemuxer) deliverPacket(r *Route, protocol tcpip.TransportProto
 		return false
 	}
 
-	eps.mu.RLock()
-
-	// Determine which transport endpoint or endpoints to deliver this packet to.
 	// If the packet is a UDP broadcast or multicast, then find all matching
-	// transport endpoints. If the packet is a TCP packet with a non-unicast
-	// source or destination address, then do nothing further and instruct
-	// the caller to do the same.
-	var destEps []*endpointsByNic
-	switch protocol {
-	case header.UDPProtocolNumber:
-		if isMulticastOrBroadcast(id.LocalAddress) {
-			destEps = d.findAllEndpointsLocked(eps, id)
-			break
+	// transport endpoints.
+	if protocol == header.UDPProtocolNumber && isMulticastOrBroadcast(id.LocalAddress) {
+		eps.mu.RLock()
+		destEPs := d.findAllEndpointsLocked(eps, id)
+		eps.mu.RUnlock()
+		// Fail if we didn't find at least one matching transport endpoint.
+		if len(destEPs) == 0 {
+			r.Stats().UDP.UnknownPortErrors.Increment()
+			return false
 		}
-
-		if ep := d.findEndpointLocked(eps, id); ep != nil {
-			destEps = append(destEps, ep)
+		// handlePacket takes ownership of pkt, so each endpoint needs its own
+		// copy except for the final one.
+		for _, ep := range destEPs[:len(destEPs)-1] {
+			ep.handlePacket(r, id, pkt.Clone())
 		}
-
-	case header.TCPProtocolNumber:
-		if !(isUnicast(r.LocalAddress) && isUnicast(r.RemoteAddress)) {
-			// TCP can only be used to communicate between a single
-			// source and a single destination; the addresses must
-			// be unicast.
-			eps.mu.RUnlock()
-			r.Stats().TCP.InvalidSegmentsReceived.Increment()
-			return true
-		}
-
-		fallthrough
-
-	default:
-		if ep := d.findEndpointLocked(eps, id); ep != nil {
-			destEps = append(destEps, ep)
-		}
+		destEPs[len(destEPs)-1].handlePacket(r, id, pkt)
+		return true
 	}
 
-	eps.mu.RUnlock()
+	// If the packet is a TCP packet with a non-unicast source or destination
+	// address, then do nothing further and instruct the caller to do the same.
+	if protocol == header.TCPProtocolNumber && (!isUnicast(r.LocalAddress) || !isUnicast(r.RemoteAddress)) {
+		// TCP can only be used to communicate between a single source and a
+		// single destination; the addresses must be unicast.
+		r.Stats().TCP.InvalidSegmentsReceived.Increment()
+		return true
+	}
 
-	// Fail if we didn't find at least one matching transport endpoint.
-	if len(destEps) == 0 {
-		// UDP packet could not be delivered to an unknown destination port.
+	eps.mu.RLock()
+	ep := d.findEndpointLocked(eps, id)
+	eps.mu.RUnlock()
+	if ep == nil {
 		if protocol == header.UDPProtocolNumber {
 			r.Stats().UDP.UnknownPortErrors.Increment()
 		}
 		return false
 	}
-
-	// HandlePacket takes ownership of pkt, so each endpoint needs its own
-	// copy except for the final one.
-	for _, ep := range destEps[:len(destEps)-1] {
-		ep.handlePacket(r, id, pkt.Clone())
-	}
-	destEps[len(destEps)-1].handlePacket(r, id, pkt)
-
+	ep.handlePacket(r, id, pkt)
 	return true
 }
 
@@ -519,11 +499,17 @@ func (d *transportDemuxer) deliverControlPacket(n *NIC, net tcpip.NetworkProtoco
 	return true
 }
 
-func (d *transportDemuxer) findAllEndpointsLocked(eps *transportEndpoints, id TransportEndpointID) []*endpointsByNic {
-	var matchedEPs []*endpointsByNic
+// iterEndpointsLocked yields all endpointsByNic in eps that match id, in
+// descending order of match quality. If a call to yield returns false,
+// iterEndpointsLocked stops iteration and returns immediately.
+//
+// Preconditions: eps.mu must be locked.
+func (d *transportDemuxer) iterEndpointsLocked(eps *transportEndpoints, id TransportEndpointID, yield func(*endpointsByNic) bool) {
 	// Try to find a match with the id as provided.
 	if ep, ok := eps.endpoints[id]; ok {
-		matchedEPs = append(matchedEPs, ep)
+		if !yield(ep) {
+			return
+		}
 	}
 
 	// Try to find a match with the id minus the local address.
@@ -531,7 +517,9 @@ func (d *transportDemuxer) findAllEndpointsLocked(eps *transportEndpoints, id Tr
 
 	nid.LocalAddress = ""
 	if ep, ok := eps.endpoints[nid]; ok {
-		matchedEPs = append(matchedEPs, ep)
+		if !yield(ep) {
+			return
+		}
 	}
 
 	// Try to find a match with the id minus the remote part.
@@ -539,14 +527,26 @@ func (d *transportDemuxer) findAllEndpointsLocked(eps *transportEndpoints, id Tr
 	nid.RemoteAddress = ""
 	nid.RemotePort = 0
 	if ep, ok := eps.endpoints[nid]; ok {
-		matchedEPs = append(matchedEPs, ep)
+		if !yield(ep) {
+			return
+		}
 	}
 
 	// Try to find a match with only the local port.
 	nid.LocalAddress = ""
 	if ep, ok := eps.endpoints[nid]; ok {
-		matchedEPs = append(matchedEPs, ep)
+		if !yield(ep) {
+			return
+		}
 	}
+}
+
+func (d *transportDemuxer) findAllEndpointsLocked(eps *transportEndpoints, id TransportEndpointID) []*endpointsByNic {
+	var matchedEPs []*endpointsByNic
+	d.iterEndpointsLocked(eps, id, func(ep *endpointsByNic) bool {
+		matchedEPs = append(matchedEPs, ep)
+		return true
+	})
 	return matchedEPs
 }
 
@@ -584,10 +584,12 @@ func (d *transportDemuxer) findTransportEndpoint(netProto tcpip.NetworkProtocolN
 // findEndpointLocked returns the endpoint that most closely matches the given
 // id.
 func (d *transportDemuxer) findEndpointLocked(eps *transportEndpoints, id TransportEndpointID) *endpointsByNic {
-	if matchedEPs := d.findAllEndpointsLocked(eps, id); len(matchedEPs) > 0 {
-		return matchedEPs[0]
-	}
-	return nil
+	var matchedEP *endpointsByNic
+	d.iterEndpointsLocked(eps, id, func(ep *endpointsByNic) bool {
+		matchedEP = ep
+		return false
+	})
+	return matchedEP
 }
 
 // registerRawEndpoint registers the given endpoint with the dispatcher such
@@ -601,8 +603,8 @@ func (d *transportDemuxer) registerRawEndpoint(netProto tcpip.NetworkProtocolNum
 	}
 
 	eps.mu.Lock()
-	defer eps.mu.Unlock()
 	eps.rawEndpoints = append(eps.rawEndpoints, ep)
+	eps.mu.Unlock()
 
 	return nil
 }
@@ -616,13 +618,16 @@ func (d *transportDemuxer) unregisterRawEndpoint(netProto tcpip.NetworkProtocolN
 	}
 
 	eps.mu.Lock()
-	defer eps.mu.Unlock()
 	for i, rawEP := range eps.rawEndpoints {
 		if rawEP == ep {
-			eps.rawEndpoints = append(eps.rawEndpoints[:i], eps.rawEndpoints[i+1:]...)
-			return
+			lastIdx := len(eps.rawEndpoints) - 1
+			eps.rawEndpoints[i] = eps.rawEndpoints[lastIdx]
+			eps.rawEndpoints[lastIdx] = nil
+			eps.rawEndpoints = eps.rawEndpoints[:lastIdx]
+			break
 		}
 	}
+	eps.mu.Unlock()
 }
 
 func isMulticastOrBroadcast(addr tcpip.Address) bool {

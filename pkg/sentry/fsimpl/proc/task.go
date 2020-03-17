@@ -45,28 +45,31 @@ var _ kernfs.Inode = (*taskInode)(nil)
 
 func newTaskInode(inoGen InoGenerator, task *kernel.Task, pidns *kernel.PIDNamespace, isThreadGroup bool, cgroupControllers map[string]string) *kernfs.Dentry {
 	contents := map[string]*kernfs.Dentry{
-		"auxv":    newTaskOwnedFile(task, inoGen.NextIno(), 0444, &auxvData{task: task}),
-		"cmdline": newTaskOwnedFile(task, inoGen.NextIno(), 0444, &cmdlineData{task: task, arg: cmdlineDataArg}),
-		"comm":    newComm(task, inoGen.NextIno(), 0444),
-		"environ": newTaskOwnedFile(task, inoGen.NextIno(), 0444, &cmdlineData{task: task, arg: environDataArg}),
-		//"exe":       newExe(t, msrc),
-		//"fd":        newFdDir(t, msrc),
-		//"fdinfo":    newFdInfoDir(t, msrc),
-		"gid_map": newTaskOwnedFile(task, inoGen.NextIno(), 0644, &idMapData{task: task, gids: true}),
-		"io":      newTaskOwnedFile(task, inoGen.NextIno(), 0400, newIO(task, isThreadGroup)),
-		"maps":    newTaskOwnedFile(task, inoGen.NextIno(), 0444, &mapsData{task: task}),
-		//"mountinfo": seqfile.NewSeqFileInode(t, &mountInfoFile{t: t}, msrc),
-		//"mounts":    seqfile.NewSeqFileInode(t, &mountsFile{t: t}, msrc),
+		"auxv":      newTaskOwnedFile(task, inoGen.NextIno(), 0444, &auxvData{task: task}),
+		"cmdline":   newTaskOwnedFile(task, inoGen.NextIno(), 0444, &cmdlineData{task: task, arg: cmdlineDataArg}),
+		"comm":      newComm(task, inoGen.NextIno(), 0444),
+		"environ":   newTaskOwnedFile(task, inoGen.NextIno(), 0444, &cmdlineData{task: task, arg: environDataArg}),
+		"exe":       newExeSymlink(task, inoGen.NextIno()),
+		"fd":        newFDDirInode(task, inoGen),
+		"fdinfo":    newFDInfoDirInode(task, inoGen),
+		"gid_map":   newTaskOwnedFile(task, inoGen.NextIno(), 0644, &idMapData{task: task, gids: true}),
+		"io":        newTaskOwnedFile(task, inoGen.NextIno(), 0400, newIO(task, isThreadGroup)),
+		"maps":      newTaskOwnedFile(task, inoGen.NextIno(), 0444, &mapsData{task: task}),
+		"mountinfo": newTaskOwnedFile(task, inoGen.NextIno(), 0444, &mountInfoData{task: task}),
+		"mounts":    newTaskOwnedFile(task, inoGen.NextIno(), 0444, &mountsData{task: task}),
+		"net":       newTaskNetDir(task, inoGen),
 		"ns": newTaskOwnedDir(task, inoGen.NextIno(), 0511, map[string]*kernfs.Dentry{
 			"net":  newNamespaceSymlink(task, inoGen.NextIno(), "net"),
 			"pid":  newNamespaceSymlink(task, inoGen.NextIno(), "pid"),
 			"user": newNamespaceSymlink(task, inoGen.NextIno(), "user"),
 		}),
-		"smaps":   newTaskOwnedFile(task, inoGen.NextIno(), 0444, &smapsData{task: task}),
-		"stat":    newTaskOwnedFile(task, inoGen.NextIno(), 0444, &taskStatData{task: task, pidns: pidns, tgstats: isThreadGroup}),
-		"statm":   newTaskOwnedFile(task, inoGen.NextIno(), 0444, &statmData{task: task}),
-		"status":  newTaskOwnedFile(task, inoGen.NextIno(), 0444, &statusData{task: task, pidns: pidns}),
-		"uid_map": newTaskOwnedFile(task, inoGen.NextIno(), 0644, &idMapData{task: task, gids: false}),
+		"oom_score":     newTaskOwnedFile(task, inoGen.NextIno(), 0444, newStaticFile("0\n")),
+		"oom_score_adj": newTaskOwnedFile(task, inoGen.NextIno(), 0644, &oomScoreAdj{task: task}),
+		"smaps":         newTaskOwnedFile(task, inoGen.NextIno(), 0444, &smapsData{task: task}),
+		"stat":          newTaskOwnedFile(task, inoGen.NextIno(), 0444, &taskStatData{task: task, pidns: pidns, tgstats: isThreadGroup}),
+		"statm":         newTaskOwnedFile(task, inoGen.NextIno(), 0444, &statmData{task: task}),
+		"status":        newTaskOwnedFile(task, inoGen.NextIno(), 0444, &statusData{task: task, pidns: pidns}),
+		"uid_map":       newTaskOwnedFile(task, inoGen.NextIno(), 0644, &idMapData{task: task, gids: false}),
 	}
 	if isThreadGroup {
 		contents["task"] = newSubtasks(task, pidns, inoGen, cgroupControllers)
@@ -104,13 +107,9 @@ func (i *taskInode) Open(rp *vfs.ResolvingPath, vfsd *vfs.Dentry, opts vfs.OpenO
 	return fd.VFSFileDescription(), nil
 }
 
-// SetStat implements kernfs.Inode.
-func (i *taskInode) SetStat(_ *vfs.Filesystem, opts vfs.SetStatOptions) error {
-	stat := opts.Stat
-	if stat.Mask&linux.STATX_MODE != 0 {
-		return syserror.EPERM
-	}
-	return nil
+// SetStat implements Inode.SetStat not allowing inode attributes to be changed.
+func (*taskInode) SetStat(context.Context, *vfs.Filesystem, *auth.Credentials, vfs.SetStatOptions) error {
+	return syserror.EPERM
 }
 
 // taskOwnedInode implements kernfs.Inode and overrides inode owner with task
@@ -152,12 +151,21 @@ func newTaskOwnedDir(task *kernel.Task, ino uint64, perm linux.FileMode, childre
 }
 
 // Stat implements kernfs.Inode.
-func (i *taskOwnedInode) Stat(fs *vfs.Filesystem) linux.Statx {
-	stat := i.Inode.Stat(fs)
-	uid, gid := i.getOwner(linux.FileMode(stat.Mode))
-	stat.UID = uint32(uid)
-	stat.GID = uint32(gid)
-	return stat
+func (i *taskOwnedInode) Stat(fs *vfs.Filesystem, opts vfs.StatOptions) (linux.Statx, error) {
+	stat, err := i.Inode.Stat(fs, opts)
+	if err != nil {
+		return linux.Statx{}, err
+	}
+	if opts.Mask&(linux.STATX_UID|linux.STATX_GID) != 0 {
+		uid, gid := i.getOwner(linux.FileMode(stat.Mode))
+		if opts.Mask&linux.STATX_UID != 0 {
+			stat.UID = uint32(uid)
+		}
+		if opts.Mask&linux.STATX_GID != 0 {
+			stat.GID = uint32(gid)
+		}
+	}
+	return stat, nil
 }
 
 // CheckPermissions implements kernfs.Inode.
@@ -234,7 +242,7 @@ func newNamespaceSymlink(task *kernel.Task, ino uint64, ns string) *kernfs.Dentr
 // member, there is one entry containing three colon-separated fields:
 //   hierarchy-ID:controller-list:cgroup-path"
 func newCgroupData(controllers map[string]string) dynamicInode {
-	buf := bytes.Buffer{}
+	var buf bytes.Buffer
 
 	// The hierarchy ids must be positive integers (for cgroup v1), but the
 	// exact number does not matter, so long as they are unique. We can
