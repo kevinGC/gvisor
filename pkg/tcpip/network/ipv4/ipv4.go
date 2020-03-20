@@ -248,7 +248,7 @@ func (e *endpoint) WritePacket(r *stack.Route, gso *stack.GSO, params stack.Netw
 	ipt := e.stack.IPTables()
 	if ok := ipt.Check(iptables.Output, pkt); !ok {
 		// iptables is telling us to drop the packet.
-		return tcpip.ErrNotSupported
+		return nil
 	}
 
 	if r.Loop&stack.PacketLoop != 0 {
@@ -291,7 +291,7 @@ func (e *endpoint) WritePackets(r *stack.Route, gso *stack.GSO, pkts []tcpip.Pac
 	// this machine and will not be forwarded.
 	ipt := e.stack.IPTables()
 	for i := range pkts {
-		if ok := ipt.Check(iptables.Input, pkts[i]); !ok {
+		if ok := ipt.Check(iptables.Output, pkts[i]); !ok {
 			// iptables is telling us to drop the packet.
 			continue
 		}

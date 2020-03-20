@@ -15,7 +15,6 @@
 package udp
 
 import (
-	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -146,8 +145,8 @@ type endpoint struct {
 	// TODO(b/142022063): Add ability to save and restore per endpoint stats.
 	stats tcpip.TransportEndpointStats `state:"nosave"`
 
-	// task is the context to get uid and gid of the packet.
-	task *kernel.Task
+	// owner is used to get uid and gid of the packet.
+	owner tcpip.PacketOwner
 }
 
 // +stateify savable
@@ -489,13 +488,7 @@ func (e *endpoint) write(p tcpip.Payloader, opts tcpip.WriteOptions) (int64, <-c
 		useDefaultTTL = false
 	}
 
-	var owner tcpip.PacketOwner
-	if e.task != nil {
-		owner.UID = uint32(e.task.Credentials().EffectiveKUID)
-		owner.GID = uint32(e.task.Credentials().EffectiveKGID)
-	}
-
-	if err := sendUDP(route, buffer.View(v).ToVectorisedView(), e.ID.LocalPort, dstPort, ttl, useDefaultTTL, e.sendTOS, &owner); err != nil {
+	if err := sendUDP(route, buffer.View(v).ToVectorisedView(), e.ID.LocalPort, dstPort, ttl, useDefaultTTL, e.sendTOS, e.owner); err != nil {
 		return 0, nil, err
 	}
 	return int64(len(v)), nil, nil
@@ -897,7 +890,7 @@ func (e *endpoint) GetSockOpt(opt interface{}) *tcpip.Error {
 
 // sendUDP sends a UDP segment via the provided network endpoint and under the
 // provided identity.
-func sendUDP(r *stack.Route, data buffer.VectorisedView, localPort, remotePort uint16, ttl uint8, useDefaultTTL bool, tos uint8, owner *tcpip.PacketOwner) *tcpip.Error {
+func sendUDP(r *stack.Route, data buffer.VectorisedView, localPort, remotePort uint16, ttl uint8, useDefaultTTL bool, tos uint8, owner tcpip.PacketOwner) *tcpip.Error {
 	// Allocate a buffer for the UDP header.
 	hdr := buffer.NewPrependable(header.UDPMinimumSize + int(r.MaxHeaderLength()))
 
@@ -1369,6 +1362,6 @@ func isBroadcastOrMulticast(a tcpip.Address) bool {
 	return a == header.IPv4Broadcast || header.IsV4MulticastAddress(a) || header.IsV6MulticastAddress(a)
 }
 
-func (e *endpoint) SetKernelTask(t *kernel.Task) {
-	e.task = t
+func (e *endpoint) SetOwner(owner tcpip.PacketOwner) {
+	e.owner = owner
 }

@@ -26,7 +26,6 @@
 package raw
 
 import (
-	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -83,8 +82,8 @@ type endpoint struct {
 	route stack.Route                  `state:"manual"`
 	stats tcpip.TransportEndpointStats `state:"nosave"`
 
-	// task is the context to get uid and gid of the packet.
-	task *kernel.Task
+	// owner is used to get uid and gid of the packet.
+	owner tcpip.PacketOwner
 }
 
 // NewEndpoint returns a raw  endpoint for the given protocols.
@@ -164,8 +163,8 @@ func (e *endpoint) Close() {
 // ModerateRecvBuf implements tcpip.Endpoint.ModerateRecvBuf.
 func (e *endpoint) ModerateRecvBuf(copied int) {}
 
-func (e *endpoint) SetKernelTask(t *kernel.Task) {
-	e.task = t
+func (e *endpoint) SetOwner(owner tcpip.PacketOwner) {
+	e.owner = owner
 }
 
 // IPTables implements tcpip.Endpoint.IPTables.
@@ -358,17 +357,11 @@ func (e *endpoint) finishWrite(payloadBytes []byte, route *stack.Route) (int64, 
 			break
 		}
 
-		var owner tcpip.PacketOwner
-		if e.task != nil {
-			owner.UID = uint32(e.task.Credentials().EffectiveKUID)
-			owner.GID = uint32(e.task.Credentials().EffectiveKGID)
-		}
-
 		hdr := buffer.NewPrependable(len(payloadBytes) + int(route.MaxHeaderLength()))
 		if err := route.WritePacket(nil /* gso */, stack.NetworkHeaderParams{Protocol: e.TransProto, TTL: route.DefaultTTL(), TOS: stack.DefaultTOS}, tcpip.PacketBuffer{
 			Header: hdr,
 			Data:   buffer.View(payloadBytes).ToVectorisedView(),
-			Owner:  &owner,
+			Owner:  e.owner,
 		}); err != nil {
 			return 0, nil, err
 		}

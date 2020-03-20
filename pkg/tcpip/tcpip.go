@@ -470,6 +470,9 @@ type Endpoint interface {
 
 	// Stats returns a reference to the endpoint stats.
 	Stats() EndpointStats
+
+	//SetOwner sets the task owner to the endpoint owner.
+	SetOwner(owner PacketOwner)
 }
 
 // EndpointInfo is the interface implemented by each endpoint info struct.

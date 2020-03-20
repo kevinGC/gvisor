@@ -15,7 +15,6 @@
 package icmp
 
 import (
-	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -76,8 +75,8 @@ type endpoint struct {
 	ttl           uint8
 	stats         tcpip.TransportEndpointStats `state:"nosave"`
 
-	// task is the context to get uid and gid of the packet.
-	task *kernel.Task
+	// owner is used to get uid and gid of the packet.
+	owner tcpip.PacketOwner
 }
 
 func newEndpoint(s *stack.Stack, netProto tcpip.NetworkProtocolNumber, transProto tcpip.TransportProtocolNumber, waiterQueue *waiter.Queue) (tcpip.Endpoint, *tcpip.Error) {
@@ -138,8 +137,8 @@ func (e *endpoint) Close() {
 // ModerateRecvBuf implements tcpip.Endpoint.ModerateRecvBuf.
 func (e *endpoint) ModerateRecvBuf(copied int) {}
 
-func (e *endpoint) SetKernelTask(t *kernel.Task) {
-	e.task = t
+func (e *endpoint) SetOwner(owner tcpip.PacketOwner) {
+	e.owner = owner
 }
 
 // IPTables implements tcpip.Endpoint.IPTables.
@@ -330,12 +329,7 @@ func (e *endpoint) write(p tcpip.Payloader, opts tcpip.WriteOptions) (int64, <-c
 
 	switch e.NetProto {
 	case header.IPv4ProtocolNumber:
-		var owner tcpip.PacketOwner
-		if e.task != nil {
-			owner.UID = uint32(e.task.Credentials().EffectiveKUID)
-			owner.GID = uint32(e.task.Credentials().EffectiveKGID)
-		}
-		err = send4(route, e.ID.LocalPort, v, e.ttl, &owner)
+		err = send4(route, e.ID.LocalPort, v, e.ttl, e.owner)
 
 	case header.IPv6ProtocolNumber:
 		err = send6(route, e.ID.LocalPort, v, e.ttl)
@@ -429,7 +423,7 @@ func (e *endpoint) GetSockOpt(opt interface{}) *tcpip.Error {
 	}
 }
 
-func send4(r *stack.Route, ident uint16, data buffer.View, ttl uint8, owner *tcpip.PacketOwner) *tcpip.Error {
+func send4(r *stack.Route, ident uint16, data buffer.View, ttl uint8, owner tcpip.PacketOwner) *tcpip.Error {
 	if len(data) < header.ICMPv4MinimumSize {
 		return tcpip.ErrInvalidEndpointState
 	}

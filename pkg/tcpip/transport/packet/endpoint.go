@@ -25,7 +25,6 @@
 package packet
 
 import (
-	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -78,9 +77,6 @@ type endpoint struct {
 	closed     bool
 	stats      tcpip.TransportEndpointStats `state:"nosave"`
 	bound      bool
-
-	// task is the context to get uid and gid of the packet.
-	task *kernel.Task
 }
 
 // NewEndpoint returns a new packet endpoint.
@@ -398,6 +394,4 @@ func (ep *endpoint) Stats() tcpip.EndpointStats {
 	return &ep.stats
 }
 
-func (e *endpoint) SetKernelTask(t *kernel.Task) {
-	e.task = t
-}
+func (ep *endpoint) SetOwner(owner tcpip.PacketOwner) {}

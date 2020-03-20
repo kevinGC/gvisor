@@ -50,6 +50,10 @@ func (ownerMarshaler) marshal(mr iptables.Matcher) []byte {
 	// TODO(gvisor.dev/issue/170): Need to support gid match.
 	if matcher.matchUID {
 		iptOwnerInfo.Match = linux.XT_OWNER_UID
+	} else if matcher.matchGID {
+		panic("GID match is not supported.")
+	} else {
+		panic("UID match is not set.")
 	}
 
 	buf := make([]byte, 0, linux.SizeOfIPTOwnerInfo)
@@ -74,7 +78,7 @@ func (ownerMarshaler) unmarshal(buf []byte, filter iptables.IPHeaderFilter) (ipt
 
 	// Support for UID match.
 	// TODO(gvisor.dev/issue/170): Need to support gid match.
-	if matchData.Match&linux.XT_OWNER_UID == 0 {
+	if matchData.Match&linux.XT_OWNER_UID != linux.XT_OWNER_UID {
 		return nil, fmt.Errorf("owner match is only supported for uid")
 	}
 
@@ -101,7 +105,7 @@ func (*OwnerMatcher) Name() string {
 }
 
 // Match implements Matcher.Match.
-func (tm *OwnerMatcher) Match(hook iptables.Hook, pkt tcpip.PacketBuffer, interfaceName string) (bool, bool) {
+func (om *OwnerMatcher) Match(hook iptables.Hook, pkt tcpip.PacketBuffer, interfaceName string) (bool, bool) {
 	// Support only for OUTPUT chain.
 	// TODO(gvisor.dev/issue/170): Need to support for POSTROUTING chain also.
 	if hook != iptables.Output {
@@ -111,12 +115,12 @@ func (tm *OwnerMatcher) Match(hook iptables.Hook, pkt tcpip.PacketBuffer, interf
 	// If the packet owner is not set, drop the packet.
 	// Support for uid match.
 	// TODO(gvisor.dev/issue/170): Need to support gid match.
-	if pkt.Owner == nil || !tm.matchUID {
+	if pkt.Owner == nil || !om.matchUID {
 		return false, true
 	}
 
-	if pkt.Owner.UID != tm.uid {
-		return false, true
+	if pkt.Owner.UID() != om.uid {
+		return false, false
 	}
 
 	return true, false

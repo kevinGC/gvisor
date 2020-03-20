@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"gvisor.dev/gvisor/pkg/rand"
-	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sleep"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -584,8 +583,8 @@ type endpoint struct {
 	// to complete the TCP shutdown.
 	closed bool
 
-	// task is the context to get uid and gid of the packet.
-	task *kernel.Task
+	// owner is used to get uid and gid of the packet.
+	owner tcpip.PacketOwner
 }
 
 // UniqueID implements stack.TransportEndpoint.UniqueID.
@@ -1123,8 +1122,8 @@ func (e *endpoint) ModerateRecvBuf(copied int) {
 	e.rcvListMu.Unlock()
 }
 
-func (e *endpoint) SetKernelTask(t *kernel.Task) {
-	e.task = t
+func (e *endpoint) SetOwner(owner tcpip.PacketOwner) {
+	e.owner = owner
 }
 
 // IPTables implements tcpip.Endpoint.IPTables.

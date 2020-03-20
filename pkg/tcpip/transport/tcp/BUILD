@@ -60,7 +60,6 @@ go_library(
     deps = [
         "//pkg/log",
         "//pkg/rand",
-        "//pkg/sentry/kernel",
         "//pkg/sleep",
         "//pkg/sync",
         "//pkg/tcpip",

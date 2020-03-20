@@ -528,7 +528,8 @@ type IPTOwnerInfo struct {
 	// Comm is the command name which created the packet.
 	Comm [16]byte
 
-	// Match is used to match UID/GID of the socket.
+	// Match is used to match UID/GID of the socket. See the
+	// XT_OWNER_* flags below.
 	Match uint8
 
 	// Invert flips the meaning of Match field.
@@ -545,6 +546,7 @@ const (
 	XT_OWNER_UID = 1 << 0
 	// Match the GID of the packet.
 	XT_OWNER_GID = 1 << 1
-	// Match if the socket exists for the packet.
+	// Match if the socket exists for the packet. Forwareded
+	// packets do not have an associated socket.
 	XT_OWNER_SOCKET = 1 << 2
 )

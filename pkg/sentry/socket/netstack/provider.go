@@ -91,10 +91,6 @@ func getTransportProtocol(ctx context.Context, stype linux.SockType, protocol in
 	return 0, true, syserr.ErrProtocolNotSupported
 }
 
-type EndpointKernel interface {
-	SetKernelTask(t *kernel.Task)
-}
-
 // Socket creates a new socket object for the AF_INET, AF_INET6, or AF_PACKET
 // family.
 func (p *provider) Socket(t *kernel.Task, stype linux.SockType, protocol int) (*fs.File, *syserr.Error) {
@@ -130,14 +126,16 @@ func (p *provider) Socket(t *kernel.Task, stype linux.SockType, protocol int) (*
 		ep, e = eps.Stack.NewRawEndpoint(transProto, p.netProto, wq, associated)
 	} else {
 		ep, e = eps.Stack.NewEndpoint(transProto, p.netProto, wq)
+
+		// Assign task to PacketOwner interface to get the UID and GID for
+		// iptables owner matching.
+		var owner tcpip.PacketOwner
+		owner = t
+		ep.SetOwner(owner)
 	}
 	if e != nil {
 		return nil, syserr.TranslateNetstackError(e)
 	}
-
-	var epT EndpointKernel
-	epT, _ = ep.(EndpointKernel)
-	epT.SetKernelTask(t)
 
 	return New(t, p.family, stype, int(transProto), wq, ep)
 }

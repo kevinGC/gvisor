@@ -697,13 +697,7 @@ func (e *endpoint) sendSynTCP(r *stack.Route, id stack.TransportEndpointID, ttl,
 }
 
 func (e *endpoint) sendTCP(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO) *tcpip.Error {
-	var owner tcpip.PacketOwner
-	if e.task != nil {
-		owner.UID = uint32(e.task.Credentials().EffectiveKUID)
-		owner.GID = uint32(e.task.Credentials().EffectiveKGID)
-	}
-
-	if err := sendTCP(r, id, data, ttl, tos, flags, seq, ack, rcvWnd, opts, gso, &owner); err != nil {
+	if err := sendTCP(r, id, data, ttl, tos, flags, seq, ack, rcvWnd, opts, gso, e.owner); err != nil {
 		e.stats.SendErrors.SegmentSendToNetworkFailed.Increment()
 		return err
 	}
@@ -746,7 +740,7 @@ func buildTCPHdr(r *stack.Route, id stack.TransportEndpointID, pkt *tcpip.Packet
 
 }
 
-func sendTCPBatch(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO, owner *tcpip.PacketOwner) *tcpip.Error {
+func sendTCPBatch(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO, owner tcpip.PacketOwner) *tcpip.Error {
 	optLen := len(opts)
 	if rcvWnd > 0xffff {
 		rcvWnd = 0xffff
@@ -792,7 +786,7 @@ func sendTCPBatch(r *stack.Route, id stack.TransportEndpointID, data buffer.Vect
 
 // sendTCP sends a TCP segment with the provided options via the provided
 // network endpoint and under the provided identity.
-func sendTCP(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO, owner *tcpip.PacketOwner) *tcpip.Error {
+func sendTCP(r *stack.Route, id stack.TransportEndpointID, data buffer.VectorisedView, ttl, tos uint8, flags byte, seq, ack seqnum.Value, rcvWnd seqnum.Size, opts []byte, gso *stack.GSO, owner tcpip.PacketOwner) *tcpip.Error {
 	optLen := len(opts)
 	if rcvWnd > 0xffff {
 		rcvWnd = 0xffff
