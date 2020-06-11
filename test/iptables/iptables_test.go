@@ -321,3 +321,15 @@ func TestInputSource(t *testing.T) {
 func TestInputInvertSource(t *testing.T) {
 	singleTest(t, FilterInputInvertSource{})
 }
+
+func TestNATPreOriginalDst(t *testing.T) {
+	singleTest(t, NATPreOriginalDst{})
+}
+
+func TestNATOutOriginalDst(t *testing.T) {
+	singleTest(t, NATOutOriginalDst{})
+}
+
+func TestNATPreOriginalDstUnchanged(t *testing.T) {
+	singleTest(t, NATPreOriginalDstUnchanged{})
+}
