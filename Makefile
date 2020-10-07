@@ -241,6 +241,12 @@ containerd-tests: containerd-test-1.2.13
 containerd-tests: containerd-test-1.3.4
 containerd-tests: containerd-test-1.4.0-beta.0
 
+# Kubernetes tests. Must be run on GCE.
+# TODO: Maybe do this inline rather than in a separate script.
+containerd-node-e2e:
+	test/kubernetes/containerd_runsc_node_e2e.sh
+.PHONY: containerd-node-e2e
+
 ##
 ## Website & documentation helpers.
 ##

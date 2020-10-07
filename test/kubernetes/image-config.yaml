@@ -1,0 +1,7 @@
+images:
+  cos-stable:
+    image_regex: cos-81-12871-69-0
+    project: cos-cloud
+    # TODO: s/kevinGC/google/
+    metadata: "user-data</go/src/github.com/containerd/cri/test/e2e_node/init.yaml,containerd-configure-sh</go/src/github.com/containerd/cri/cluster/gce/configure.sh,containerd-extra-init-sh</go/src/github.com/kevinGC/gvisor/test/kubernetes/runsc-node-e2e-init.sh,containerd-env</go/src/github.com/kevinGC/gvisor/test/kubernetes/env-node,gci-update-strategy=update_disabled"
+
