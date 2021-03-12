@@ -87,8 +87,18 @@ func (fd *tunFD) Ioctl(ctx context.Context, uio usermem.IO, args arch.SyscallArg
 		if _, err := req.CopyIn(t, data); err != nil {
 			return 0, err
 		}
+
+		// Validate flags.
 		flags := usermem.ByteOrder.Uint16(req.Data[:])
-		return 0, fd.device.SetIff(stack.Stack, req.Name(), flags)
+		if flags&^uint16(linux.IFF_TUN|linux.IFF_TAP|linux.IFF_NO_PI) != 0 {
+			return 0, syserror.EINVAL
+		}
+
+		return 0, fd.device.SetIff(stack.Stack, req.Name(), tun.Flags{
+			TUN:          flags&linux.IFF_TUN != 0,
+			TAP:          flags&linux.IFF_TAP != 0,
+			NoPacketInfo: flags&linux.IFF_NO_PI != 0,
+		})
 
 	case linux.TUNGETIFF:
 		var req linux.IFReq
@@ -97,8 +107,18 @@ func (fd *tunFD) Ioctl(ctx context.Context, uio usermem.IO, args arch.SyscallArg
 
 		// Linux adds IFF_NOFILTER (the same value as IFF_NO_PI unfortunately) when
 		// there is no sk_filter. See __tun_chr_ioctl() in net/drivers/tun.c.
-		flags := fd.device.Flags() | linux.IFF_NOFILTER
-		usermem.ByteOrder.PutUint16(req.Data[:], flags)
+		flags := fd.device.Flags()
+		bitflags := uint16(linux.IFF_NOFILTER)
+		if flags.TAP {
+			bitflags |= linux.IFF_TAP
+		}
+		if flags.TUN {
+			bitflags |= linux.IFF_TUN
+		}
+		if flags.NoPacketInfo {
+			bitflags |= linux.IFF_NO_PI
+		}
+		usermem.ByteOrder.PutUint16(req.Data[:], bitflags)
 
 		_, err := req.CopyOut(t, data)
 		return 0, err
