@@ -188,19 +188,24 @@ func (e *endpoint) Resume(s *stack.Stack) {
 		log.Infof("tcp.endpoint.Resume: connected: calling connect")
 		err := e.connect(tcpip.FullAddress{NIC: e.boundNICID, Addr: e.connectingAddress, Port: e.TransportEndpointInfo.ID.RemotePort}, false /* handshake */)
 		if _, ok := err.(*tcpip.ErrConnectStarted); !ok {
+			log.Infof("tcp.endpoint.Resume: connected: connecting failed: %v", err)
 			panic("endpoint connecting failed: " + err.String())
 		}
 		e.state.Store(e.origEndpointState)
+		log.Infof("stored state")
 		// For FIN-WAIT-2 and TIME-WAIT we need to start the appropriate timers so
 		// that the socket is closed correctly.
 		switch epState {
 		case StateFinWait2:
+			log.Infof("tcp.endpoint.Resume: setting finwait2 timer")
 			e.finWait2Timer = e.stack.Clock().AfterFunc(e.tcpLingerTimeout, e.finWait2TimerExpired)
 		case StateTimeWait:
+			log.Infof("tcp.endpoint.Resume: setting finwait timer")
 			e.timeWaitTimer = e.stack.Clock().AfterFunc(e.getTimeWaitDuration(), e.timeWaitTimerExpired)
 		}
 
 		e.mu.Unlock()
+		log.Infof("tcp.endpoint.Resume: unlocked")
 		connectedLoading.Done()
 		log.Infof("tcp.endpoint.Resume: connected: done")
 	case epState == StateListen:

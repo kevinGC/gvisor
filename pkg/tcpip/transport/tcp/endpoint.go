@@ -26,6 +26,7 @@ import (
 
 	"gvisor.dev/gvisor/pkg/atomicbitops"
 	"gvisor.dev/gvisor/pkg/bufferv2"
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/sleep"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -2358,14 +2359,17 @@ func (e *endpoint) registerEndpoint(addr tcpip.FullAddress, netProto tcpip.Netwo
 // connect connects the endpoint to its peer.
 // +checklocks:e.mu
 func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
+	log.Infof("tcp.endpoint.connect")
 	connectingAddr := addr.Addr
 
 	addr, netProto, err := e.checkV4MappedLocked(addr)
 	if err != nil {
+		log.Infof("tcp.endpoint.connect: mapped addr error")
 		return err
 	}
 
 	if e.EndpointState().connected() {
+		log.Infof("tcp.endpoint.connect: connected")
 		// The endpoint is already connected. If caller hasn't been
 		// notified yet, return success.
 		if !e.isConnectNotified {
@@ -2379,39 +2383,48 @@ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
 	nicID := addr.NIC
 	switch e.EndpointState() {
 	case StateBound:
+		log.Infof("tcp.endpoint.connect: bound")
 		// If we're already bound to a NIC but the caller is requesting
 		// that we use a different one now, we cannot proceed.
 		if e.boundNICID == 0 {
+			log.Infof("tcp.endpoint.connect: bound: nicid 0")
 			break
 		}
 
 		if nicID != 0 && nicID != e.boundNICID {
+			log.Infof("tcp.endpoint.connect: bound: unreachable")
 			return &tcpip.ErrHostUnreachable{}
 		}
 
 		nicID = e.boundNICID
 
 	case StateInitial:
+		log.Infof("tcp.endpoint.connect: initial")
 		// Nothing to do. We'll eventually fill-in the gaps in the ID (if any)
 		// when we find a route.
 
 	case StateConnecting, StateSynSent, StateSynRecv:
+		log.Infof("tcp.endpoint.connect: connecting")
 		// A connection request has already been issued but hasn't completed
 		// yet.
 		return &tcpip.ErrAlreadyConnecting{}
 
 	case StateError:
+		log.Infof("tcp.endpoint.connect: error")
 		if err := e.hardErrorLocked(); err != nil {
 			return err
 		}
 		return &tcpip.ErrConnectionAborted{}
 
 	default:
+		log.Infof("tcp.endpoint.connect: invalid")
 		return &tcpip.ErrInvalidEndpointState{}
 	}
 
 	// Find a route to the desired destination.
+	log.Infof("tcp.endpoint.connect: FindRoute")
 	r, err := e.stack.FindRoute(nicID, e.TransportEndpointInfo.ID.LocalAddress, addr.Addr, netProto, false /* multicastLoop */)
+	log.Infof("tcp.endpoint.connect: finished FindRoute")
 	if err != nil {
 		return err
 	}
@@ -2423,6 +2436,7 @@ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
 
 	oldState := e.EndpointState()
 	e.setEndpointState(StateConnecting)
+	log.Infof("tcp.endpoint.connect: registering endpoint")
 	if err := e.registerEndpoint(addr, netProto, r.NICID()); err != nil {
 		e.setEndpointState(oldState)
 		return err
@@ -2440,6 +2454,7 @@ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
 	// Connect in the restore phase does not perform handshake. Restore its
 	// connection setting here.
 	if !handshake {
+		log.Infof("tcp.endpoint.connect: notifying for segments in th send queue")
 		e.segmentQueue.mu.Lock()
 		for _, l := range []segmentList{e.segmentQueue.list, e.snd.writeList} {
 			for s := l.Front(); s != nil; s = s.Next() {
@@ -2454,10 +2469,12 @@ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
 		// Set the new auto tuned send buffer size after entering
 		// established state.
 		e.ops.SetSendBufferSize(e.computeTCPSendBufferSize(), false /* notify */)
+		log.Infof("tcp.endpoint.connect: !handshake done")
 		return &tcpip.ErrConnectStarted{}
 	}
 
 	// Start a new handshake.
+	log.Infof("tcp.endpoint.connect: starting a new handshake")
 	h := e.newHandshake()
 	e.setEndpointState(StateSynSent)
 	h.start()
