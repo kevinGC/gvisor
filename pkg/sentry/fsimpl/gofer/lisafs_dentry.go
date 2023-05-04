@@ -521,6 +521,7 @@ func (d *lisafsDentry) statfs(ctx context.Context) (linux.Statfs, error) {
 }
 
 func (d *lisafsDentry) restoreFile(ctx context.Context, inode *lisafs.Inode, opts *vfs.CompleteRestoreOptions) error {
+	log.Infof("gofer.lisafsDentry.restoreFile")
 	d.controlFD = d.fs.client.NewFD(inode.ControlFD)
 
 	// Gofers do not preserve inoKey across checkpoint/restore, so:
@@ -556,16 +557,20 @@ func (d *lisafsDentry) restoreFile(ctx context.Context, inode *lisafs.Inode, opt
 			}
 		}
 	}
+	log.Infof("gofer.lisafsDentry.restoreFile: cachedMetadataAuthoritative")
 	if !d.cachedMetadataAuthoritative() {
+		log.Infof("gofer.lisafsDentry.restoreFile: updateMetadataFromStatxLocked")
 		d.updateMetadataFromStatxLocked(&inode.Stat)
 	}
 
 	if rw, ok := d.fs.savedDentryRW[&d.dentry]; ok {
+		log.Infof("gofer.lisafsDentry.restoreFile: ensureSharedHandle")
 		if err := d.ensureSharedHandle(ctx, rw.read, rw.write, false /* trunc */); err != nil {
 			return err
 		}
 	}
 
+	log.Infof("gofer.lisafsDentry.restoreFile: done")
 	return nil
 }
 

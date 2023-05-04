@@ -506,17 +506,22 @@ func (fs *filesystem) restoreRoot(ctx context.Context, opts *vfs.CompleteRestore
 //   - !d.isSynthetic().
 //   - d.parent != nil and has been restored.
 func (d *dentry) restoreFile(ctx context.Context, opts *vfs.CompleteRestoreOptions) error {
+	log.Infof("gofer.dentry.restoreFile")
 	switch dt := d.impl.(type) {
 	case *lisafsDentry:
+		log.Infof("gofer.dentry.restoreFile: lisafsDentry")
 		inode, err := d.parent.impl.(*lisafsDentry).controlFD.Walk(ctx, d.name)
 		if err != nil {
 			return err
 		}
+		log.Infof("gofer.dentry.restoreFile: lisafsDentry: walked")
 		return dt.restoreFile(ctx, &inode, opts)
 	case *directfsDentry:
+		log.Infof("gofer.dentry.restoreFile: directfsdentry")
 		childFD, err := tryOpen(func(flags int) (int, error) {
 			return unix.Openat(d.parent.impl.(*directfsDentry).controlFD, d.name, flags, 0)
 		})
+		log.Infof("gofer.dentry.restoreFile: directfsdentry: tried to open")
 		if err != nil {
 			return err
 		}

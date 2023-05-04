@@ -646,11 +646,13 @@ func (d *directfsDentry) statfs() (linux.Statfs, error) {
 }
 
 func (d *directfsDentry) restoreFile(ctx context.Context, controlFD int, opts *vfs.CompleteRestoreOptions) error {
+	log.Infof("gofer.directfsDentry.restoreFile")
 	if controlFD < 0 {
 		log.Warningf("directfsDentry.restoreFile called with invalid controlFD")
 		return unix.EINVAL
 	}
 	var stat unix.Stat_t
+	log.Infof("gofer.directfsDentry.restoreFile: fstat")
 	if err := unix.Fstat(controlFD, &stat); err != nil {
 		_ = unix.Close(controlFD)
 		return err
@@ -684,11 +686,14 @@ func (d *directfsDentry) restoreFile(ctx context.Context, controlFD int, opts *v
 			}
 		}
 	}
+	log.Infof("gofer.directfsDentry.restoreFile: cachedMetadataAuthoritative")
 	if !d.cachedMetadataAuthoritative() {
+		log.Infof("gofer.directfsDentry.restoreFile: updateMetadataFromStatLocked")
 		d.updateMetadataFromStatLocked(&stat)
 	}
 
 	if rw, ok := d.fs.savedDentryRW[&d.dentry]; ok {
+		log.Infof("gofer.directfsDentry.restoreFile: ensureSharedHandle")
 		if err := d.ensureSharedHandle(ctx, rw.read, rw.write, false /* trunc */); err != nil {
 			return err
 		}
