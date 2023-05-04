@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"gvisor.dev/gvisor/pkg/atomicbitops"
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -120,10 +121,13 @@ func (e *endpoint) afterLoad() {
 
 // Resume implements tcpip.ResumableEndpoint.Resume.
 func (e *endpoint) Resume(s *stack.Stack) {
+	log.Infof("tcp.endpoint.Resume")
 	if !e.EndpointState().closed() {
+		log.Infof("tcp.endpoint.Resume: init keepalive timer")
 		e.keepalive.timer.init(s.Clock(), maybeFailTimerHandler(e, e.keepaliveTimerExpired))
 	}
 	if snd := e.snd; snd != nil {
+		log.Infof("tcp.endpoint.Resume: init several timers")
 		snd.resendTimer.init(s.Clock(), maybeFailTimerHandler(e, e.snd.retransmitTimerExpired))
 		snd.reorderTimer.init(s.Clock(), timerHandler(e, e.snd.rc.reorderTimerExpired))
 		snd.probeTimer.init(s.Clock(), timerHandler(e, e.snd.probeTimerExpired))
@@ -134,6 +138,7 @@ func (e *endpoint) Resume(s *stack.Stack) {
 	e.segmentQueue.thaw()
 
 	bind := func() {
+		log.Infof("tcp.endpoint.Resume: func1")
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		addr, _, err := e.checkV4MappedLocked(tcpip.FullAddress{Addr: e.BindAddr, Port: e.TransportEndpointInfo.ID.LocalPort})
@@ -149,6 +154,7 @@ func (e *endpoint) Resume(s *stack.Stack) {
 			BindToDevice: e.boundBindToDevice,
 			Dest:         e.boundDest,
 		}
+		log.Infof("tcp.endpoint.Resume: func1: reserving port")
 		if ok := e.stack.ReserveTuple(portRes); !ok {
 			panic(fmt.Sprintf("unable to re-reserve tuple (%v, %q, %d, %+v, %d, %v)", e.effectiveNetProtos, addr.Addr, addr.Port, e.boundPortFlags, e.boundBindToDevice, e.boundDest))
 		}
@@ -156,12 +162,15 @@ func (e *endpoint) Resume(s *stack.Stack) {
 
 		// Mark endpoint as bound.
 		e.setEndpointState(StateBound)
+		log.Infof("tcp.endpoint.Resume: func1: done")
 	}
 
 	epState := EndpointState(e.origEndpointState)
 	switch {
 	case epState.connected():
+		log.Infof("tcp.endpoint.Resume: connected")
 		bind()
+		log.Infof("tcp.endpoint.Resume: connected: bound")
 		if len(e.connectingAddress) == 0 {
 			e.connectingAddress = e.TransportEndpointInfo.ID.RemoteAddress
 			// This endpoint is accepted by netstack but not yet by
@@ -176,6 +185,7 @@ func (e *endpoint) Resume(s *stack.Stack) {
 		// we do not restore SACK information.
 		e.scoreboard.Reset()
 		e.mu.Lock()
+		log.Infof("tcp.endpoint.Resume: connected: calling connect")
 		err := e.connect(tcpip.FullAddress{NIC: e.boundNICID, Addr: e.connectingAddress, Port: e.TransportEndpointInfo.ID.RemotePort}, false /* handshake */)
 		if _, ok := err.(*tcpip.ErrConnectStarted); !ok {
 			panic("endpoint connecting failed: " + err.String())
@@ -192,7 +202,9 @@ func (e *endpoint) Resume(s *stack.Stack) {
 
 		e.mu.Unlock()
 		connectedLoading.Done()
+		log.Infof("tcp.endpoint.Resume: connected: done")
 	case epState == StateListen:
+		log.Infof("tcp.endpoint.Resume: listen")
 		tcpip.AsyncLoading.Add(1)
 		go func() {
 			connectedLoading.Wait()
@@ -200,32 +212,39 @@ func (e *endpoint) Resume(s *stack.Stack) {
 			e.acceptMu.Lock()
 			backlog := e.acceptQueue.capacity
 			e.acceptMu.Unlock()
+			log.Infof("tcp.endpoint.Resume: listen: calling Listen")
 			if err := e.Listen(backlog); err != nil {
 				panic("endpoint listening failed: " + err.String())
 			}
 			e.LockUser()
 			if e.shutdownFlags != 0 {
+				log.Infof("tcp.endpoint.Resume: listen: shutting down")
 				e.shutdownLocked(e.shutdownFlags)
 			}
 			e.UnlockUser()
 			listenLoading.Done()
 			tcpip.AsyncLoading.Done()
+			log.Infof("tcp.endpoint.Resume: listen: done")
 		}()
 	case epState == StateConnecting:
+		log.Infof("tcp.endpoint.Resume: connecting")
 		// Initial SYN hasn't been sent yet so initiate a connect.
 		tcpip.AsyncLoading.Add(1)
 		go func() {
 			connectedLoading.Wait()
 			listenLoading.Wait()
 			bind()
+			log.Infof("tcp.endpoint.Resume: func: calling connect")
 			err := e.Connect(tcpip.FullAddress{NIC: e.boundNICID, Addr: e.connectingAddress, Port: e.TransportEndpointInfo.ID.RemotePort})
 			if _, ok := err.(*tcpip.ErrConnectStarted); !ok {
 				panic("endpoint connecting failed: " + err.String())
 			}
 			connectingLoading.Done()
 			tcpip.AsyncLoading.Done()
+			log.Infof("tcp.endpoint.Resume: func: calling done")
 		}()
 	case epState == StateSynSent || epState == StateSynRecv:
+		log.Infof("tcp.endpoint.Resume: syn sent or recvd")
 		connectedLoading.Wait()
 		listenLoading.Wait()
 		// Initial SYN has been sent/received so we should bind the
@@ -246,7 +265,9 @@ func (e *endpoint) Resume(s *stack.Stack) {
 		}
 		e.h.retransmitTimer = timer
 		connectingLoading.Done()
+		log.Infof("tcp.endpoint.Resume: syn sent or recvd: done")
 	case epState == StateBound:
+		log.Infof("tcp.endpoint.Resume: bound")
 		tcpip.AsyncLoading.Add(1)
 		go func() {
 			connectedLoading.Wait()
@@ -255,14 +276,19 @@ func (e *endpoint) Resume(s *stack.Stack) {
 			bind()
 			tcpip.AsyncLoading.Done()
 		}()
+		log.Infof("tcp.endpoint.Resume: bound: done")
 	case epState == StateClose:
+		log.Infof("tcp.endpoint.Resume: closed")
 		e.isPortReserved = false
 		e.state.Store(uint32(StateClose))
 		e.stack.CompleteTransportEndpointCleanup(e)
 		tcpip.DeleteDanglingEndpoint(e)
+		log.Infof("tcp.endpoint.Resume: closed: done")
 	case epState == StateError:
+		log.Infof("tcp.endpoint.Resume: error")
 		e.state.Store(uint32(StateError))
 		e.stack.CompleteTransportEndpointCleanup(e)
 		tcpip.DeleteDanglingEndpoint(e)
+		log.Infof("tcp.endpoint.Resume: error: done")
 	}
 }

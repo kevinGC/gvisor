@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"gvisor.dev/gvisor/pkg/hostarch"
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/safemem"
 	"gvisor.dev/gvisor/pkg/sentry/memmap"
 	"gvisor.dev/gvisor/pkg/sentry/pgalloc"
@@ -96,6 +97,7 @@ func NewVDSOParamPage(mfp pgalloc.MemoryFileProvider, fr memmap.FileRange) *VDSO
 
 // access returns a mapping of the param page.
 func (v *VDSOParamPage) access() (safemem.Block, error) {
+	log.Infof("kernel.VDSOParamPage.Access")
 	bs, err := v.mfp.MemoryFile().MapInternal(v.fr, hostarch.ReadWrite)
 	if err != nil {
 		return safemem.Block{}, err
@@ -127,6 +129,7 @@ func (v *VDSOParamPage) incrementSeq(paramPage safemem.Block) error {
 // Write starts a write block, calls f to get the new parameters, writes
 // out the new parameters, then ends the write block.
 func (v *VDSOParamPage) Write(f func() vdsoParams) error {
+	log.Infof("kernel.VDSOParamPage.Write")
 	paramPage, err := v.access()
 	if err != nil {
 		return err
@@ -138,17 +141,20 @@ func (v *VDSOParamPage) Write(f func() vdsoParams) error {
 		panic("Out-of-order sequence count")
 	}
 
+	log.Infof("kernel.VDSOParamPage.Write: incrementing")
 	err = v.incrementSeq(paramPage)
 	if err != nil {
 		return err
 	}
 
 	// Get the new params.
+	log.Infof("kernel.VDSOParamPage.Write: unmarshaling")
 	p := f()
 	buf := v.copyScratchBuffer[:p.SizeBytes()]
 	p.MarshalUnsafe(buf)
 
 	// Skip the sequence counter.
+	log.Infof("kernel.VDSOParamPage.Write: copying")
 	if _, err := safemem.Copy(paramPage.DropFirst(8), safemem.BlockFromSafeSlice(buf)); err != nil {
 		panic(fmt.Sprintf("Unable to get set VDSO parameters: %v", err))
 	}

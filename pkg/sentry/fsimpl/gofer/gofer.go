@@ -550,6 +550,7 @@ func (fstype FilesystemType) GetFilesystem(ctx context.Context, vfsObj *vfs.Virt
 // initClientAndGetRoot initializes fs.client and returns the root inode for
 // this mount point. It handles the attach point (fs.opts.aname) resolution.
 func (fs *filesystem) initClientAndGetRoot(ctx context.Context) (lisafs.Inode, int, error) {
+	log.Infof("gofer.fs.initClientAndGetRoot")
 	sock, err := unet.NewSocket(fs.opts.fd)
 	if err != nil {
 		return lisafs.Inode{}, -1, err
@@ -562,6 +563,7 @@ func (fs *filesystem) initClientAndGetRoot(ctx context.Context) (lisafs.Inode, i
 		rootInode  lisafs.Inode
 		rootHostFD int
 	)
+	log.Infof("gofer.fs.initClientAndGetRoo: creating a new clientt")
 	fs.client, rootInode, rootHostFD, err = lisafs.NewClient(sock)
 	if err != nil {
 		return lisafs.Inode{}, -1, err
@@ -592,9 +594,11 @@ func (fs *filesystem) initClientAndGetRoot(ctx context.Context) (lisafs.Inode, i
 			rootHostFD = -1
 		}
 		// Use flipcall channels with lisafs because it makes a lot of RPCs.
+		log.Infof("gofer.fs.initClientAndGetRoo: starting channels")
 		if err := fs.client.StartChannels(); err != nil {
 			return lisafs.Inode{}, -1, err
 		}
+		log.Infof("gofer.fs.initClientAndGetRoo: handleAnameLisafs")
 		rootInode, err = fs.handleAnameLisafs(ctx, rootInode)
 		if err != nil {
 			return lisafs.Inode{}, -1, err

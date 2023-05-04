@@ -600,24 +600,30 @@ func (k *Kernel) LoadFrom(ctx context.Context, r wire.Reader, timeReady chan str
 	}
 	log.Infof("Memory load took [%s].", time.Since(memoryStart))
 
+	// This is the last thing we see in the boot log -- the crash occurs somewhere after here.
 	log.Infof("Overall load took [%s]", time.Since(loadStart))
 
 	k.Timekeeper().SetClocks(clocks)
 
 	if timeReady != nil {
+		log.Infof("kernel.Kernel.LoadFrom: closing timeready")
 		close(timeReady)
 	}
 
 	if net != nil {
+		log.Infof("kernel.Kernel.LoadFrom: resuming net")
 		net.Resume()
 	}
 
+	log.Infof("kernel.Kernel.LoadFrom: completing VFS restore")
 	if err := k.vfs.CompleteRestore(ctx, vfsOpts); err != nil {
 		return err
 	}
 
+	log.Infof("kernel.Kernel.LoadFrom: tcpip.AsyncLoading.Wait()")
 	tcpip.AsyncLoading.Wait()
 
+	// We don't see this -- the crash occurs before this.
 	log.Infof("Overall load took [%s] after async work", time.Since(loadStart))
 
 	// Applications may size per-cpu structures based on k.applicationCores, so
@@ -1372,6 +1378,7 @@ func (k *Kernel) SetMemoryFile(mf *pgalloc.MemoryFile) {
 
 // MemoryFile implements pgalloc.MemoryFileProvider.MemoryFile.
 func (k *Kernel) MemoryFile() *pgalloc.MemoryFile {
+	log.Infof("kernel.Kernel.MemoryFile")
 	return k.mf
 }
 

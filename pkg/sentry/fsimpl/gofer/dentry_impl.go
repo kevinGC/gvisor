@@ -482,6 +482,7 @@ func (d *dentry) statfs(ctx context.Context) (linux.Statfs, error) {
 }
 
 func (fs *filesystem) restoreRoot(ctx context.Context, opts *vfs.CompleteRestoreOptions) error {
+	log.Infof("gofer.fs.restoreRoot")
 	rootInode, rootHostFD, err := fs.initClientAndGetRoot(ctx)
 	if err != nil {
 		return err
@@ -490,8 +491,10 @@ func (fs *filesystem) restoreRoot(ctx context.Context, opts *vfs.CompleteRestore
 	// The root is always non-synthetic.
 	switch dt := fs.root.impl.(type) {
 	case *lisafsDentry:
+		log.Infof("gofer.fs.restoreRoot: restore file")
 		return dt.restoreFile(ctx, &rootInode, opts)
 	case *directfsDentry:
+		log.Infof("gofer.fs.restoreRoot: restore file directfs")
 		dt.controlFDLisa = fs.client.NewFD(rootInode.ControlFD)
 		return dt.restoreFile(ctx, rootHostFD, opts)
 	default:

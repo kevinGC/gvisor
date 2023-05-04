@@ -24,6 +24,7 @@ import (
 	"gvisor.dev/gvisor/pkg/errors/linuxerr"
 	"gvisor.dev/gvisor/pkg/fdnotifier"
 	"gvisor.dev/gvisor/pkg/hostarch"
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/refs"
 	"gvisor.dev/gvisor/pkg/safemem"
 	"gvisor.dev/gvisor/pkg/sentry/vfs"
@@ -171,6 +172,7 @@ func (fd *specialFileFD) afterLoad() {
 // CompleteRestore implements
 // vfs.FilesystemImplSaveRestoreExtension.CompleteRestore.
 func (fs *filesystem) CompleteRestore(ctx context.Context, opts vfs.CompleteRestoreOptions) error {
+	log.Infof("gofer.fs.CompleteRestore")
 	fdmapv := ctx.Value(CtxRestoreServerFDMap)
 	if fdmapv == nil {
 		return fmt.Errorf("no server FD map available")
@@ -183,11 +185,13 @@ func (fs *filesystem) CompleteRestore(ctx context.Context, opts vfs.CompleteRest
 	fs.opts.fd = fd
 	fs.inoByKey = make(map[inoKey]uint64)
 
+	log.Infof("gofer.fs.CompleteRestore: restoring root")
 	if err := fs.restoreRoot(ctx, &opts); err != nil {
 		return err
 	}
 
 	// Restore remaining dentries.
+	log.Infof("gofer.fs.CompleteRestore: restoring desendants")
 	if err := fs.root.restoreDescendantsRecursive(ctx, &opts); err != nil {
 		return err
 	}
@@ -197,12 +201,14 @@ func (fs *filesystem) CompleteRestore(ctx context.Context, opts vfs.CompleteRest
 	// non-readable pipe FDs are opened last to ensure that they don't get
 	// ENXIO if another specialFileFD represents the read end of the same pipe.
 	// This is consistent with VFS1.
+	log.Infof("gofer.fs.CompleteRestore: handle special files")
 	haveWriteOnlyPipes := false
 	for fd := fs.specialFileFDs.Front(); fd != nil; fd = fd.Next() {
 		if fd.dentry().fileType() == linux.S_IFIFO && !fd.vfsfd.IsReadable() {
 			haveWriteOnlyPipes = true
 			continue
 		}
+		log.Infof("gofer.fs.CompleteRestore: handle special files: completeRestore")
 		if err := fd.completeRestore(ctx); err != nil {
 			return err
 		}
@@ -210,6 +216,7 @@ func (fs *filesystem) CompleteRestore(ctx context.Context, opts vfs.CompleteRest
 	if haveWriteOnlyPipes {
 		for fd := fs.specialFileFDs.Front(); fd != nil; fd = fd.Next() {
 			if fd.dentry().fileType() == linux.S_IFIFO && !fd.vfsfd.IsReadable() {
+				log.Infof("gofer.fs.CompleteRestore: handle special files: completeRestore for write only pipe")
 				if err := fd.completeRestore(ctx); err != nil {
 					return err
 				}

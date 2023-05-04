@@ -498,6 +498,7 @@ func (cm *containerManager) Restore(o *RestoreOpts, _ *struct{}) error {
 	if err := loadOpts.Load(ctx, k, nil, networkStack, time.NewCalibratedClocks(), &vfs.CompleteRestoreOptions{}); err != nil {
 		return err
 	}
+	log.Infof("controller.containerManager.Restore: finished loading. We shouldn't hit this!")
 
 	// Since we have a new kernel we also must make a new watchdog.
 	dogOpts := watchdog.DefaultOpts

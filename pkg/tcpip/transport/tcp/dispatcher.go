@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/rand"
 
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/sleep"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -474,9 +475,11 @@ func (d *dispatcher) pause() {
 // resume resumes a previously paused dispatcher and its processor goroutines.
 // Calling resume on a dispatcher that was never paused is a no-op.
 func (d *dispatcher) resume() {
+	log.Infof("tcp.dispatcher.resume")
 	d.mu.Lock()
 
 	if !d.paused {
+		log.Infof("tcp.dispatcher.resume: not paused")
 		// If this was a restore run the stack is a new instance and
 		// it was never paused, so just return as there is nothing to
 		// resume.
@@ -485,9 +488,11 @@ func (d *dispatcher) resume() {
 	}
 	d.paused = false
 	d.mu.Unlock()
+	log.Infof("tcp.dispatcher.resume: resuming processors")
 	for i := range d.processors {
 		d.processors[i].resume()
 	}
+	log.Infof("tcp.dispatcher.resume: done")
 }
 
 // jenkinsHasher contains state needed to for a jenkins hash.

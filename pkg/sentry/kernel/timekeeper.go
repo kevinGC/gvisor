@@ -114,9 +114,11 @@ func NewTimekeeper(mfp pgalloc.MemoryFileProvider, paramPage memmap.FileRange) *
 //
 // It must also be called after Load.
 func (t *Timekeeper) SetClocks(c sentrytime.Clocks) {
+	log.Infof("kernel.Timekeeper.SetClocks")
 	// Update the params, marking them "not ready", as we may need to
 	// restart calibration on this new machine.
 	if t.restored != nil {
+		log.Infof("kernel.Timekeeper.SetClocks: writing VDSO params")
 		if err := t.params.Write(func() vdsoParams {
 			return vdsoParams{}
 		}); err != nil {
@@ -143,11 +145,13 @@ func (t *Timekeeper) SetClocks(c sentrytime.Clocks) {
 	// If real time went backwards, it remains the same.
 	wantMonotonic := int64(0)
 
+	log.Infof("kernel.Timekeeper.SetClocks: getting monotonic")
 	nowMonotonic, err := t.clocks.GetTime(sentrytime.Monotonic)
 	if err != nil {
 		panic("Unable to get current monotonic time: " + err.Error())
 	}
 
+	log.Infof("kernel.Timekeeper.SetClocks: getting realtime")
 	nowRealtime, err := t.clocks.GetTime(sentrytime.Realtime)
 	if err != nil {
 		panic("Unable to get current realtime: " + err.Error())
@@ -165,14 +169,17 @@ func (t *Timekeeper) SetClocks(c sentrytime.Clocks) {
 
 	if t.restored == nil {
 		// Hold on to the initial "boot" time.
+		log.Infof("kernel.Timekeeper.SetClocks: saving boottime")
 		t.bootTime = ktime.FromNanoseconds(nowRealtime)
 	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	log.Infof("kernel.Timekeeper.SetClocks: starting the updated")
 	t.startUpdater()
 
 	if t.restored != nil {
+		log.Infof("kernel.Timekeeper.SetClocks: closing restored channel")
 		close(t.restored)
 	}
 }

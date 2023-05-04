@@ -795,6 +795,7 @@ func (f *MemoryFile) DecRef(fr memmap.FileRange) {
 
 // MapInternal implements memmap.File.MapInternal.
 func (f *MemoryFile) MapInternal(fr memmap.FileRange, at hostarch.AccessType) (safemem.BlockSeq, error) {
+	log.Infof("pgalloc.MemoryFile.MapInternal")
 	if !fr.WellFormed() || fr.Length() == 0 {
 		panic(fmt.Sprintf("invalid range: %v", fr))
 	}

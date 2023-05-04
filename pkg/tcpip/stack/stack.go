@@ -1780,16 +1780,20 @@ func (s *Stack) Pause() {
 // Resume restarts the stack after a restore. This must be called after the
 // entire system has been restored.
 func (s *Stack) Resume() {
+	log.Infof("stack.Stack.Resume")
 	// ResumableEndpoint.Resume() may call other methods on s, so we can't hold
 	// s.mu while resuming the endpoints.
 	s.mu.Lock()
 	eps := s.resumableEndpoints
 	s.resumableEndpoints = nil
 	s.mu.Unlock()
+	log.Infof("stack.Stack.Resume: resuming endpoints")
 	for _, e := range eps {
+		log.Infof("stack.Stack.Resume: resuming endpoint of type %T", e)
 		e.Resume(s)
 	}
 	// Now resume any protocol level background workers.
+	log.Infof("stack.Stack.Resume: resuming protocols")
 	for _, p := range s.transportProtocols {
 		p.proto.Resume()
 	}

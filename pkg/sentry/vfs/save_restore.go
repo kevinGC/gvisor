@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 
 	"gvisor.dev/gvisor/pkg/context"
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/refs"
 	"gvisor.dev/gvisor/pkg/waiter"
 )
@@ -62,7 +63,9 @@ func (vfs *VirtualFilesystem) PrepareSave(ctx context.Context) error {
 // CompleteRestore completes restoration from checkpoint for all filesystems
 // after deserialization.
 func (vfs *VirtualFilesystem) CompleteRestore(ctx context.Context, opts *CompleteRestoreOptions) error {
+	log.Infof("vfs.VirtualFilesystem.CompleteRestore")
 	for fs := range vfs.getFilesystems() {
+		log.Infof("vfs.VirtualFilesystem.CompleteRestore: got fs: %T", fs)
 		if ext, ok := fs.impl.(FilesystemImplSaveRestoreExtension); ok {
 			if err := ext.CompleteRestore(ctx, *opts); err != nil {
 				fs.DecRef(ctx)
