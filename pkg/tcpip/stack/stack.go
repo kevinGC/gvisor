@@ -1200,22 +1200,27 @@ func (s *Stack) NewRouteForMulticast(nicID tcpip.NICID, remoteAddr tcpip.Address
 //
 // +checklocksread:s.mu
 func (s *Stack) findLocalRouteFromNICRLocked(localAddressNIC *nic, localAddr, remoteAddr tcpip.Address, netProto tcpip.NetworkProtocolNumber) *Route {
+	log.Infof("stack.Stack.findLocalRouteFromNICRLocked")
 	localAddressEndpoint := localAddressNIC.getAddressOrCreateTempInner(netProto, localAddr, false /* createTemp */, NeverPrimaryEndpoint)
 	if localAddressEndpoint == nil {
+		log.Infof("stack.Stack.findLocalRouteFromNICRLocked: localAddressEndpoint is nil")
 		return nil
 	}
 
 	var outgoingNIC *nic
 	// Prefer a local route to the same interface as the local address.
 	if localAddressNIC.hasAddress(netProto, remoteAddr) {
+		log.Infof("stack.Stack.findLocalRouteFromNICRLocked: prefer same interface")
 		outgoingNIC = localAddressNIC
 	}
 
 	// If the remote address isn't owned by the local address's NIC, check all
 	// NICs.
 	if outgoingNIC == nil {
+		log.Infof("stack.Stack.findLocalRouteFromNICRLocked: outgoing nic is nil")
 		for _, nic := range s.nics {
 			if nic.hasAddress(netProto, remoteAddr) {
+				log.Infof("stack.Stack.findLocalRouteFromNICRLocked: nic has adderss")
 				outgoingNIC = nic
 				break
 			}
@@ -1225,6 +1230,7 @@ func (s *Stack) findLocalRouteFromNICRLocked(localAddressNIC *nic, localAddr, re
 	// If the remote address is not owned by the stack, we can't return a local
 	// route.
 	if outgoingNIC == nil {
+		log.Infof("stack.Stack.findLocalRouteFromNICRLocked: outgoing nic is still nil")
 		localAddressEndpoint.DecRef()
 		return nil
 	}
@@ -1239,6 +1245,7 @@ func (s *Stack) findLocalRouteFromNICRLocked(localAddressNIC *nic, localAddr, re
 	)
 
 	if r.IsOutboundBroadcast() {
+		log.Infof("stack.Stack.findLocalRouteFromNICRLocked: IsOutboundBroadcast")
 		r.Release()
 		return nil
 	}
@@ -1253,24 +1260,30 @@ func (s *Stack) findLocalRouteFromNICRLocked(localAddressNIC *nic, localAddr, re
 //
 // +checklocksread:s.mu
 func (s *Stack) findLocalRouteRLocked(localAddressNICID tcpip.NICID, localAddr, remoteAddr tcpip.Address, netProto tcpip.NetworkProtocolNumber) *Route {
+	log.Infof("stack.Stack.findLocalRouteRLocked")
 	if len(localAddr) == 0 {
+		log.Infof("stack.Stack.findLocalRouteRLocked: len(localAddr) == 0")
 		localAddr = remoteAddr
 	}
 
 	if localAddressNICID == 0 {
+		log.Infof("stack.Stack.findLocalRouteRLocked: unset local addr nicid")
 		for _, localAddressNIC := range s.nics {
 			if r := s.findLocalRouteFromNICRLocked(localAddressNIC, localAddr, remoteAddr, netProto); r != nil {
 				return r
 			}
 		}
 
+		log.Infof("stack.Stack.findLocalRouteRLocked: found nothing with unset local addr nicid")
 		return nil
 	}
 
 	if localAddressNIC, ok := s.nics[localAddressNICID]; ok {
+		log.Infof("stack.Stack.findLocalRouteRLocked: found localAddressNIC")
 		return s.findLocalRouteFromNICRLocked(localAddressNIC, localAddr, remoteAddr, netProto)
 	}
 
+	log.Infof("stack.Stack.findLocalRouteRLocked: finished")
 	return nil
 }
 
@@ -1348,7 +1361,7 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 				log.Infof("stack.Stack.FindRoute: failed to get an addressable endopint")
 			}
 		} else {
-			log.Infof("stack.Stack.FindRoute: failed to get nic with id %d: ok is %t and nic.Enabled() is %t", id, ok, nic.Enabled())
+			log.Infof("stack.Stack.FindRoute: failed to get nic with id %d: ok is %t", id, ok)
 		}
 
 		if isLoopback {

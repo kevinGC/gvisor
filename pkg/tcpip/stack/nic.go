@@ -489,6 +489,7 @@ func (n *nic) getAddressOrCreateTemp(protocol tcpip.NetworkProtocolNumber, addre
 // getAddressOrCreateTempInner is like getAddressEpOrCreateTemp except a boolean
 // is passed to indicate whether or not we should generate temporary endpoints.
 func (n *nic) getAddressOrCreateTempInner(protocol tcpip.NetworkProtocolNumber, address tcpip.Address, createTemp bool, peb PrimaryEndpointBehavior) AssignableAddressEndpoint {
+	log.Infof("stack.nic.getAddressOrCreateTempInner")
 	ep := n.getNetworkEndpoint(protocol)
 	if ep == nil {
 		log.Infof("stack.nic.getAddressOrCreateTempInner: failed to get network endpoint")

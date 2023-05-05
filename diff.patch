@@ -1,0 +1,1171 @@
+diff --git a/pkg/seccomp/seccomp.go b/pkg/seccomp/seccomp.go
+index cb85d46c1..51a12211e 100644
+--- a/pkg/seccomp/seccomp.go
++++ b/pkg/seccomp/seccomp.go
+@@ -55,7 +55,7 @@ func Install(rules SyscallRules, denyRules SyscallRules) error {
+ 	}
+ 
+ 	// Uncomment to get stack trace when there is a violation.
+-	// defaultAction = linux.BPFAction(linux.SECCOMP_RET_TRAP)
++	defaultAction = linux.BPFAction(linux.SECCOMP_RET_TRAP)
+ 
+ 	log.Infof("Installing seccomp filters for %d syscalls (action=%v)", len(rules), defaultAction)
+ 
+diff --git a/pkg/sentry/fsimpl/gofer/dentry_impl.go b/pkg/sentry/fsimpl/gofer/dentry_impl.go
+index 851bc0f43..c3ffd7640 100644
+--- a/pkg/sentry/fsimpl/gofer/dentry_impl.go
++++ b/pkg/sentry/fsimpl/gofer/dentry_impl.go
+@@ -482,6 +482,7 @@ func (d *dentry) statfs(ctx context.Context) (linux.Statfs, error) {
+ }
+ 
+ func (fs *filesystem) restoreRoot(ctx context.Context, opts *vfs.CompleteRestoreOptions) error {
++	log.Infof("gofer.fs.restoreRoot")
+ 	rootInode, rootHostFD, err := fs.initClientAndGetRoot(ctx)
+ 	if err != nil {
+ 		return err
+@@ -490,8 +491,10 @@ func (fs *filesystem) restoreRoot(ctx context.Context, opts *vfs.CompleteRestore
+ 	// The root is always non-synthetic.
+ 	switch dt := fs.root.impl.(type) {
+ 	case *lisafsDentry:
++		log.Infof("gofer.fs.restoreRoot: restore file")
+ 		return dt.restoreFile(ctx, &rootInode, opts)
+ 	case *directfsDentry:
++		log.Infof("gofer.fs.restoreRoot: restore file directfs")
+ 		dt.controlFDLisa = fs.client.NewFD(rootInode.ControlFD)
+ 		return dt.restoreFile(ctx, rootHostFD, opts)
+ 	default:
+@@ -503,17 +506,22 @@ func (fs *filesystem) restoreRoot(ctx context.Context, opts *vfs.CompleteRestore
+ //   - !d.isSynthetic().
+ //   - d.parent != nil and has been restored.
+ func (d *dentry) restoreFile(ctx context.Context, opts *vfs.CompleteRestoreOptions) error {
++	log.Infof("gofer.dentry.restoreFile")
+ 	switch dt := d.impl.(type) {
+ 	case *lisafsDentry:
++		log.Infof("gofer.dentry.restoreFile: lisafsDentry")
+ 		inode, err := d.parent.impl.(*lisafsDentry).controlFD.Walk(ctx, d.name)
+ 		if err != nil {
+ 			return err
+ 		}
++		log.Infof("gofer.dentry.restoreFile: lisafsDentry: walked")
+ 		return dt.restoreFile(ctx, &inode, opts)
+ 	case *directfsDentry:
++		log.Infof("gofer.dentry.restoreFile: directfsdentry")
+ 		childFD, err := tryOpen(func(flags int) (int, error) {
+ 			return unix.Openat(d.parent.impl.(*directfsDentry).controlFD, d.name, flags, 0)
+ 		})
++		log.Infof("gofer.dentry.restoreFile: directfsdentry: tried to open")
+ 		if err != nil {
+ 			return err
+ 		}
+diff --git a/pkg/sentry/fsimpl/gofer/directfs_dentry.go b/pkg/sentry/fsimpl/gofer/directfs_dentry.go
+index fdbfee371..188ef593c 100644
+--- a/pkg/sentry/fsimpl/gofer/directfs_dentry.go
++++ b/pkg/sentry/fsimpl/gofer/directfs_dentry.go
+@@ -646,11 +646,13 @@ func (d *directfsDentry) statfs() (linux.Statfs, error) {
+ }
+ 
+ func (d *directfsDentry) restoreFile(ctx context.Context, controlFD int, opts *vfs.CompleteRestoreOptions) error {
++	log.Infof("gofer.directfsDentry.restoreFile")
+ 	if controlFD < 0 {
+ 		log.Warningf("directfsDentry.restoreFile called with invalid controlFD")
+ 		return unix.EINVAL
+ 	}
+ 	var stat unix.Stat_t
++	log.Infof("gofer.directfsDentry.restoreFile: fstat")
+ 	if err := unix.Fstat(controlFD, &stat); err != nil {
+ 		_ = unix.Close(controlFD)
+ 		return err
+@@ -684,11 +686,14 @@ func (d *directfsDentry) restoreFile(ctx context.Context, controlFD int, opts *v
+ 			}
+ 		}
+ 	}
++	log.Infof("gofer.directfsDentry.restoreFile: cachedMetadataAuthoritative")
+ 	if !d.cachedMetadataAuthoritative() {
++		log.Infof("gofer.directfsDentry.restoreFile: updateMetadataFromStatLocked")
+ 		d.updateMetadataFromStatLocked(&stat)
+ 	}
+ 
+ 	if rw, ok := d.fs.savedDentryRW[&d.dentry]; ok {
++		log.Infof("gofer.directfsDentry.restoreFile: ensureSharedHandle")
+ 		if err := d.ensureSharedHandle(ctx, rw.read, rw.write, false /* trunc */); err != nil {
+ 			return err
+ 		}
+diff --git a/pkg/sentry/fsimpl/gofer/gofer.go b/pkg/sentry/fsimpl/gofer/gofer.go
+index 61dcc73e3..98d7da032 100644
+--- a/pkg/sentry/fsimpl/gofer/gofer.go
++++ b/pkg/sentry/fsimpl/gofer/gofer.go
+@@ -550,6 +550,7 @@ func (fstype FilesystemType) GetFilesystem(ctx context.Context, vfsObj *vfs.Virt
+ // initClientAndGetRoot initializes fs.client and returns the root inode for
+ // this mount point. It handles the attach point (fs.opts.aname) resolution.
+ func (fs *filesystem) initClientAndGetRoot(ctx context.Context) (lisafs.Inode, int, error) {
++	log.Infof("gofer.fs.initClientAndGetRoot")
+ 	sock, err := unet.NewSocket(fs.opts.fd)
+ 	if err != nil {
+ 		return lisafs.Inode{}, -1, err
+@@ -562,6 +563,7 @@ func (fs *filesystem) initClientAndGetRoot(ctx context.Context) (lisafs.Inode, i
+ 		rootInode  lisafs.Inode
+ 		rootHostFD int
+ 	)
++	log.Infof("gofer.fs.initClientAndGetRoo: creating a new clientt")
+ 	fs.client, rootInode, rootHostFD, err = lisafs.NewClient(sock)
+ 	if err != nil {
+ 		return lisafs.Inode{}, -1, err
+@@ -592,9 +594,11 @@ func (fs *filesystem) initClientAndGetRoot(ctx context.Context) (lisafs.Inode, i
+ 			rootHostFD = -1
+ 		}
+ 		// Use flipcall channels with lisafs because it makes a lot of RPCs.
++		log.Infof("gofer.fs.initClientAndGetRoo: starting channels")
+ 		if err := fs.client.StartChannels(); err != nil {
+ 			return lisafs.Inode{}, -1, err
+ 		}
++		log.Infof("gofer.fs.initClientAndGetRoo: handleAnameLisafs")
+ 		rootInode, err = fs.handleAnameLisafs(ctx, rootInode)
+ 		if err != nil {
+ 			return lisafs.Inode{}, -1, err
+diff --git a/pkg/sentry/fsimpl/gofer/lisafs_dentry.go b/pkg/sentry/fsimpl/gofer/lisafs_dentry.go
+index 0b4c2f831..ae825dbb8 100644
+--- a/pkg/sentry/fsimpl/gofer/lisafs_dentry.go
++++ b/pkg/sentry/fsimpl/gofer/lisafs_dentry.go
+@@ -521,6 +521,7 @@ func (d *lisafsDentry) statfs(ctx context.Context) (linux.Statfs, error) {
+ }
+ 
+ func (d *lisafsDentry) restoreFile(ctx context.Context, inode *lisafs.Inode, opts *vfs.CompleteRestoreOptions) error {
++	log.Infof("gofer.lisafsDentry.restoreFile")
+ 	d.controlFD = d.fs.client.NewFD(inode.ControlFD)
+ 
+ 	// Gofers do not preserve inoKey across checkpoint/restore, so:
+@@ -556,16 +557,20 @@ func (d *lisafsDentry) restoreFile(ctx context.Context, inode *lisafs.Inode, opt
+ 			}
+ 		}
+ 	}
++	log.Infof("gofer.lisafsDentry.restoreFile: cachedMetadataAuthoritative")
+ 	if !d.cachedMetadataAuthoritative() {
++		log.Infof("gofer.lisafsDentry.restoreFile: updateMetadataFromStatxLocked")
+ 		d.updateMetadataFromStatxLocked(&inode.Stat)
+ 	}
+ 
+ 	if rw, ok := d.fs.savedDentryRW[&d.dentry]; ok {
++		log.Infof("gofer.lisafsDentry.restoreFile: ensureSharedHandle")
+ 		if err := d.ensureSharedHandle(ctx, rw.read, rw.write, false /* trunc */); err != nil {
+ 			return err
+ 		}
+ 	}
+ 
++	log.Infof("gofer.lisafsDentry.restoreFile: done")
+ 	return nil
+ }
+ 
+diff --git a/pkg/sentry/fsimpl/gofer/save_restore.go b/pkg/sentry/fsimpl/gofer/save_restore.go
+index bf91ad442..0958b9321 100644
+--- a/pkg/sentry/fsimpl/gofer/save_restore.go
++++ b/pkg/sentry/fsimpl/gofer/save_restore.go
+@@ -24,6 +24,7 @@ import (
+ 	"gvisor.dev/gvisor/pkg/errors/linuxerr"
+ 	"gvisor.dev/gvisor/pkg/fdnotifier"
+ 	"gvisor.dev/gvisor/pkg/hostarch"
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/refs"
+ 	"gvisor.dev/gvisor/pkg/safemem"
+ 	"gvisor.dev/gvisor/pkg/sentry/vfs"
+@@ -171,6 +172,7 @@ func (fd *specialFileFD) afterLoad() {
+ // CompleteRestore implements
+ // vfs.FilesystemImplSaveRestoreExtension.CompleteRestore.
+ func (fs *filesystem) CompleteRestore(ctx context.Context, opts vfs.CompleteRestoreOptions) error {
++	log.Infof("gofer.fs.CompleteRestore")
+ 	fdmapv := ctx.Value(CtxRestoreServerFDMap)
+ 	if fdmapv == nil {
+ 		return fmt.Errorf("no server FD map available")
+@@ -183,11 +185,13 @@ func (fs *filesystem) CompleteRestore(ctx context.Context, opts vfs.CompleteRest
+ 	fs.opts.fd = fd
+ 	fs.inoByKey = make(map[inoKey]uint64)
+ 
++	log.Infof("gofer.fs.CompleteRestore: restoring root")
+ 	if err := fs.restoreRoot(ctx, &opts); err != nil {
+ 		return err
+ 	}
+ 
+ 	// Restore remaining dentries.
++	log.Infof("gofer.fs.CompleteRestore: restoring desendants")
+ 	if err := fs.root.restoreDescendantsRecursive(ctx, &opts); err != nil {
+ 		return err
+ 	}
+@@ -197,12 +201,14 @@ func (fs *filesystem) CompleteRestore(ctx context.Context, opts vfs.CompleteRest
+ 	// non-readable pipe FDs are opened last to ensure that they don't get
+ 	// ENXIO if another specialFileFD represents the read end of the same pipe.
+ 	// This is consistent with VFS1.
++	log.Infof("gofer.fs.CompleteRestore: handle special files")
+ 	haveWriteOnlyPipes := false
+ 	for fd := fs.specialFileFDs.Front(); fd != nil; fd = fd.Next() {
+ 		if fd.dentry().fileType() == linux.S_IFIFO && !fd.vfsfd.IsReadable() {
+ 			haveWriteOnlyPipes = true
+ 			continue
+ 		}
++		log.Infof("gofer.fs.CompleteRestore: handle special files: completeRestore")
+ 		if err := fd.completeRestore(ctx); err != nil {
+ 			return err
+ 		}
+@@ -210,6 +216,7 @@ func (fs *filesystem) CompleteRestore(ctx context.Context, opts vfs.CompleteRest
+ 	if haveWriteOnlyPipes {
+ 		for fd := fs.specialFileFDs.Front(); fd != nil; fd = fd.Next() {
+ 			if fd.dentry().fileType() == linux.S_IFIFO && !fd.vfsfd.IsReadable() {
++				log.Infof("gofer.fs.CompleteRestore: handle special files: completeRestore for write only pipe")
+ 				if err := fd.completeRestore(ctx); err != nil {
+ 					return err
+ 				}
+diff --git a/pkg/sentry/kernel/kernel.go b/pkg/sentry/kernel/kernel.go
+index a8eac65fc..325d89211 100644
+--- a/pkg/sentry/kernel/kernel.go
++++ b/pkg/sentry/kernel/kernel.go
+@@ -600,24 +600,30 @@ func (k *Kernel) LoadFrom(ctx context.Context, r wire.Reader, timeReady chan str
+ 	}
+ 	log.Infof("Memory load took [%s].", time.Since(memoryStart))
+ 
++	// This is the last thing we see in the boot log -- the crash occurs somewhere after here.
+ 	log.Infof("Overall load took [%s]", time.Since(loadStart))
+ 
+ 	k.Timekeeper().SetClocks(clocks)
+ 
+ 	if timeReady != nil {
++		log.Infof("kernel.Kernel.LoadFrom: closing timeready")
+ 		close(timeReady)
+ 	}
+ 
+ 	if net != nil {
++		log.Infof("kernel.Kernel.LoadFrom: resuming net")
+ 		net.Resume()
+ 	}
+ 
++	log.Infof("kernel.Kernel.LoadFrom: completing VFS restore")
+ 	if err := k.vfs.CompleteRestore(ctx, vfsOpts); err != nil {
+ 		return err
+ 	}
+ 
++	log.Infof("kernel.Kernel.LoadFrom: tcpip.AsyncLoading.Wait()")
+ 	tcpip.AsyncLoading.Wait()
+ 
++	// We don't see this -- the crash occurs before this.
+ 	log.Infof("Overall load took [%s] after async work", time.Since(loadStart))
+ 
+ 	// Applications may size per-cpu structures based on k.applicationCores, so
+@@ -1372,6 +1378,7 @@ func (k *Kernel) SetMemoryFile(mf *pgalloc.MemoryFile) {
+ 
+ // MemoryFile implements pgalloc.MemoryFileProvider.MemoryFile.
+ func (k *Kernel) MemoryFile() *pgalloc.MemoryFile {
++	log.Infof("kernel.Kernel.MemoryFile")
+ 	return k.mf
+ }
+ 
+diff --git a/pkg/sentry/kernel/timekeeper.go b/pkg/sentry/kernel/timekeeper.go
+index 5560b48d2..bf699a0bc 100644
+--- a/pkg/sentry/kernel/timekeeper.go
++++ b/pkg/sentry/kernel/timekeeper.go
+@@ -114,9 +114,11 @@ func NewTimekeeper(mfp pgalloc.MemoryFileProvider, paramPage memmap.FileRange) *
+ //
+ // It must also be called after Load.
+ func (t *Timekeeper) SetClocks(c sentrytime.Clocks) {
++	log.Infof("kernel.Timekeeper.SetClocks")
+ 	// Update the params, marking them "not ready", as we may need to
+ 	// restart calibration on this new machine.
+ 	if t.restored != nil {
++		log.Infof("kernel.Timekeeper.SetClocks: writing VDSO params")
+ 		if err := t.params.Write(func() vdsoParams {
+ 			return vdsoParams{}
+ 		}); err != nil {
+@@ -143,11 +145,13 @@ func (t *Timekeeper) SetClocks(c sentrytime.Clocks) {
+ 	// If real time went backwards, it remains the same.
+ 	wantMonotonic := int64(0)
+ 
++	log.Infof("kernel.Timekeeper.SetClocks: getting monotonic")
+ 	nowMonotonic, err := t.clocks.GetTime(sentrytime.Monotonic)
+ 	if err != nil {
+ 		panic("Unable to get current monotonic time: " + err.Error())
+ 	}
+ 
++	log.Infof("kernel.Timekeeper.SetClocks: getting realtime")
+ 	nowRealtime, err := t.clocks.GetTime(sentrytime.Realtime)
+ 	if err != nil {
+ 		panic("Unable to get current realtime: " + err.Error())
+@@ -165,14 +169,17 @@ func (t *Timekeeper) SetClocks(c sentrytime.Clocks) {
+ 
+ 	if t.restored == nil {
+ 		// Hold on to the initial "boot" time.
++		log.Infof("kernel.Timekeeper.SetClocks: saving boottime")
+ 		t.bootTime = ktime.FromNanoseconds(nowRealtime)
+ 	}
+ 
+ 	t.mu.Lock()
+ 	defer t.mu.Unlock()
++	log.Infof("kernel.Timekeeper.SetClocks: starting the updated")
+ 	t.startUpdater()
+ 
+ 	if t.restored != nil {
++		log.Infof("kernel.Timekeeper.SetClocks: closing restored channel")
+ 		close(t.restored)
+ 	}
+ }
+diff --git a/pkg/sentry/kernel/vdso.go b/pkg/sentry/kernel/vdso.go
+index 7011f60fd..9ab822602 100644
+--- a/pkg/sentry/kernel/vdso.go
++++ b/pkg/sentry/kernel/vdso.go
+@@ -18,6 +18,7 @@ import (
+ 	"fmt"
+ 
+ 	"gvisor.dev/gvisor/pkg/hostarch"
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/safemem"
+ 	"gvisor.dev/gvisor/pkg/sentry/memmap"
+ 	"gvisor.dev/gvisor/pkg/sentry/pgalloc"
+@@ -96,6 +97,7 @@ func NewVDSOParamPage(mfp pgalloc.MemoryFileProvider, fr memmap.FileRange) *VDSO
+ 
+ // access returns a mapping of the param page.
+ func (v *VDSOParamPage) access() (safemem.Block, error) {
++	log.Infof("kernel.VDSOParamPage.Access")
+ 	bs, err := v.mfp.MemoryFile().MapInternal(v.fr, hostarch.ReadWrite)
+ 	if err != nil {
+ 		return safemem.Block{}, err
+@@ -127,6 +129,7 @@ func (v *VDSOParamPage) incrementSeq(paramPage safemem.Block) error {
+ // Write starts a write block, calls f to get the new parameters, writes
+ // out the new parameters, then ends the write block.
+ func (v *VDSOParamPage) Write(f func() vdsoParams) error {
++	log.Infof("kernel.VDSOParamPage.Write")
+ 	paramPage, err := v.access()
+ 	if err != nil {
+ 		return err
+@@ -138,17 +141,20 @@ func (v *VDSOParamPage) Write(f func() vdsoParams) error {
+ 		panic("Out-of-order sequence count")
+ 	}
+ 
++	log.Infof("kernel.VDSOParamPage.Write: incrementing")
+ 	err = v.incrementSeq(paramPage)
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+ 	// Get the new params.
++	log.Infof("kernel.VDSOParamPage.Write: unmarshaling")
+ 	p := f()
+ 	buf := v.copyScratchBuffer[:p.SizeBytes()]
+ 	p.MarshalUnsafe(buf)
+ 
+ 	// Skip the sequence counter.
++	log.Infof("kernel.VDSOParamPage.Write: copying")
+ 	if _, err := safemem.Copy(paramPage.DropFirst(8), safemem.BlockFromSafeSlice(buf)); err != nil {
+ 		panic(fmt.Sprintf("Unable to get set VDSO parameters: %v", err))
+ 	}
+diff --git a/pkg/sentry/pgalloc/pgalloc.go b/pkg/sentry/pgalloc/pgalloc.go
+index 3757fc3eb..b2782ab50 100644
+--- a/pkg/sentry/pgalloc/pgalloc.go
++++ b/pkg/sentry/pgalloc/pgalloc.go
+@@ -795,6 +795,7 @@ func (f *MemoryFile) DecRef(fr memmap.FileRange) {
+ 
+ // MapInternal implements memmap.File.MapInternal.
+ func (f *MemoryFile) MapInternal(fr memmap.FileRange, at hostarch.AccessType) (safemem.BlockSeq, error) {
++	log.Infof("pgalloc.MemoryFile.MapInternal")
+ 	if !fr.WellFormed() || fr.Length() == 0 {
+ 		panic(fmt.Sprintf("invalid range: %v", fr))
+ 	}
+diff --git a/pkg/sentry/vfs/save_restore.go b/pkg/sentry/vfs/save_restore.go
+index a3b736f8b..fb2543fb1 100644
+--- a/pkg/sentry/vfs/save_restore.go
++++ b/pkg/sentry/vfs/save_restore.go
+@@ -18,6 +18,7 @@ import (
+ 	"sync/atomic"
+ 
+ 	"gvisor.dev/gvisor/pkg/context"
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/refs"
+ 	"gvisor.dev/gvisor/pkg/waiter"
+ )
+@@ -62,7 +63,9 @@ func (vfs *VirtualFilesystem) PrepareSave(ctx context.Context) error {
+ // CompleteRestore completes restoration from checkpoint for all filesystems
+ // after deserialization.
+ func (vfs *VirtualFilesystem) CompleteRestore(ctx context.Context, opts *CompleteRestoreOptions) error {
++	log.Infof("vfs.VirtualFilesystem.CompleteRestore")
+ 	for fs := range vfs.getFilesystems() {
++		log.Infof("vfs.VirtualFilesystem.CompleteRestore: got fs: %T", fs)
+ 		if ext, ok := fs.impl.(FilesystemImplSaveRestoreExtension); ok {
+ 			if err := ext.CompleteRestore(ctx, *opts); err != nil {
+ 				fs.DecRef(ctx)
+diff --git a/pkg/tcpip/network/ipv4/BUILD b/pkg/tcpip/network/ipv4/BUILD
+index 41aca5722..7a74721f4 100644
+--- a/pkg/tcpip/network/ipv4/BUILD
++++ b/pkg/tcpip/network/ipv4/BUILD
+@@ -17,6 +17,7 @@ go_library(
+     deps = [
+         "//pkg/atomicbitops",
+         "//pkg/bufferv2",
++        "//pkg/log",
+         "//pkg/sync",
+         "//pkg/tcpip",
+         "//pkg/tcpip/checksum",
+diff --git a/pkg/tcpip/network/ipv4/ipv4.go b/pkg/tcpip/network/ipv4/ipv4.go
+index 17d414163..0ae967f45 100644
+--- a/pkg/tcpip/network/ipv4/ipv4.go
++++ b/pkg/tcpip/network/ipv4/ipv4.go
+@@ -23,6 +23,7 @@ import (
+ 
+ 	"gvisor.dev/gvisor/pkg/atomicbitops"
+ 	"gvisor.dev/gvisor/pkg/bufferv2"
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/sync"
+ 	"gvisor.dev/gvisor/pkg/tcpip"
+ 	"gvisor.dev/gvisor/pkg/tcpip/header"
+@@ -1400,14 +1401,17 @@ func (e *endpoint) MainAddress() tcpip.AddressWithPrefix {
+ 
+ // AcquireAssignedAddress implements stack.AddressableEndpoint.
+ func (e *endpoint) AcquireAssignedAddress(localAddr tcpip.Address, allowTemp bool, tempPEB stack.PrimaryEndpointBehavior) stack.AddressEndpoint {
++	log.Infof("ipv4.endpoint.AcquireAssignedAddress")
+ 	e.mu.RLock()
+ 	defer e.mu.RUnlock()
+ 
+ 	loopback := e.nic.IsLoopback()
++	log.Infof("ipv4.endpoint.AcquireAssignedAddress: loopback: %t", loopback)
+ 	return e.addressableEndpointState.AcquireAssignedAddressOrMatching(localAddr, func(addressEndpoint stack.AddressEndpoint) bool {
+ 		subnet := addressEndpoint.Subnet()
+ 		// IPv4 has a notion of a subnet broadcast address and considers the
+ 		// loopback interface bound to an address's whole subnet (on linux).
++		log.Infof("ipv4.endpoint.AcquireAssignedAddress: func1: %T %T", subnet.IsBroadcast(localAddr), subnet.Contains(localAddr))
+ 		return subnet.IsBroadcast(localAddr) || (loopback && subnet.Contains(localAddr))
+ 	}, allowTemp, tempPEB)
+ }
+diff --git a/pkg/tcpip/network/ipv6/BUILD b/pkg/tcpip/network/ipv6/BUILD
+index c43baa1e6..074b13860 100644
+--- a/pkg/tcpip/network/ipv6/BUILD
++++ b/pkg/tcpip/network/ipv6/BUILD
+@@ -19,6 +19,7 @@ go_library(
+     deps = [
+         "//pkg/atomicbitops",
+         "//pkg/bufferv2",
++        "//pkg/log",
+         "//pkg/sync",
+         "//pkg/tcpip",
+         "//pkg/tcpip/header",
+diff --git a/pkg/tcpip/network/ipv6/ipv6.go b/pkg/tcpip/network/ipv6/ipv6.go
+index 14f723784..8dd480bbe 100644
+--- a/pkg/tcpip/network/ipv6/ipv6.go
++++ b/pkg/tcpip/network/ipv6/ipv6.go
+@@ -26,6 +26,7 @@ import (
+ 
+ 	"gvisor.dev/gvisor/pkg/atomicbitops"
+ 	"gvisor.dev/gvisor/pkg/bufferv2"
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/sync"
+ 	"gvisor.dev/gvisor/pkg/tcpip"
+ 	"gvisor.dev/gvisor/pkg/tcpip/header"
+@@ -2040,6 +2041,7 @@ func (e *endpoint) MainAddress() tcpip.AddressWithPrefix {
+ 
+ // AcquireAssignedAddress implements stack.AddressableEndpoint.
+ func (e *endpoint) AcquireAssignedAddress(localAddr tcpip.Address, allowTemp bool, tempPEB stack.PrimaryEndpointBehavior) stack.AddressEndpoint {
++	log.Infof("ipv6.endpoint.AcquireAssignedAddress")
+ 	e.mu.RLock()
+ 	defer e.mu.RUnlock()
+ 	return e.acquireAddressOrCreateTempLocked(localAddr, allowTemp, tempPEB)
+@@ -2085,6 +2087,7 @@ func (e *endpoint) getLinkLocalAddressRLocked() tcpip.Address {
+ //
+ // Precondition: e.mu must be read locked.
+ func (e *endpoint) acquireOutgoingPrimaryAddressRLocked(remoteAddr tcpip.Address, allowExpired bool) stack.AddressEndpoint {
++	log.Infof("ipv6.endpoint.acquireOutgoingPrimaryAddressRLocked")
+ 	// addrCandidate is a candidate for Source Address Selection, as per
+ 	// RFC 6724 section 5.
+ 	type addrCandidate struct {
+diff --git a/pkg/tcpip/stack/addressable_endpoint_state.go b/pkg/tcpip/stack/addressable_endpoint_state.go
+index 91b615eb6..7791faf67 100644
+--- a/pkg/tcpip/stack/addressable_endpoint_state.go
++++ b/pkg/tcpip/stack/addressable_endpoint_state.go
+@@ -17,6 +17,7 @@ package stack
+ import (
+ 	"fmt"
+ 
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/tcpip"
+ )
+ 
+@@ -199,13 +200,16 @@ func (a *AddressableEndpointState) AddAndAcquireAddress(addr tcpip.AddressWithPr
+ //
+ // +checklocks:a.mu
+ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.AddressWithPrefix, properties AddressProperties, kind AddressKind) (*addressState, tcpip.Error) {
++	log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked")
+ 	var permanent bool
+ 	switch kind {
+ 	case PermanentExpired:
+ 		panic(fmt.Sprintf("cannot add address %s in PermanentExpired state", addr))
+ 	case Permanent, PermanentTentative:
++		log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: PermanentTentative or Permanent")
+ 		permanent = true
+ 	case Temporary:
++		log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: Temporary")
+ 	default:
+ 		panic(fmt.Sprintf("unknown address kind: %d", kind))
+ 	}
+@@ -214,7 +218,9 @@ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.Address
+ 	attemptAddToPrimary := true
+ 	addrState, ok := a.endpoints[addr.Address]
+ 	if ok {
++		log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: found addrState")
+ 		if !permanent {
++			log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: non-permanent already exists")
+ 			// We are adding a non-permanent address but the address exists. No need
+ 			// to go any further since we can only promote existing temporary/expired
+ 			// addresses to permanent.
+@@ -231,6 +237,7 @@ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.Address
+ 		if isPermanent {
+ 			// We are adding a permanent address but a permanent address already
+ 			// exists.
++			log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: permanent already exists")
+ 			return nil, &tcpip.ErrDuplicateAddress{}
+ 		}
+ 
+@@ -258,6 +265,7 @@ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.Address
+ 		}
+ 		addrState.refs.IncRef()
+ 	} else {
++		log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: didn't find addrState")
+ 		addrState = &addressState{
+ 			addressableEndpointState: a,
+ 			addr:                     addr,
+@@ -321,6 +329,7 @@ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.Address
+ 	}
+ 
+ 	addrState.notifyChangedLocked()
++	log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: ending with return of %+v", addrState)
+ 	return addrState, nil
+ }
+ 
+@@ -462,19 +471,25 @@ func (a *AddressableEndpointState) MainAddress() tcpip.AddressWithPrefix {
+ //
+ // +checklocksread:a.mu
+ func (a *AddressableEndpointState) acquirePrimaryAddressRLocked(isValid func(*addressState) bool) *addressState {
++	log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked")
+ 	var deprecatedEndpoint *addressState
+ 	for _, ep := range a.primary {
+ 		if !isValid(ep) {
++			log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: invalid: %+v", ep)
+ 			continue
+ 		}
++		log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: valid: %+v", ep)
+ 
+ 		if !ep.Deprecated() {
++			log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: not deprecated")
+ 			if ep.IncRef() {
++				log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: IncRef'd")
+ 				// ep is not deprecated, so return it immediately.
+ 				//
+ 				// If we kept track of a deprecated endpoint, decrement its reference
+ 				// count since it was incremented when we decided to keep track of it.
+ 				if deprecatedEndpoint != nil {
++					log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: deprecated non nil")
+ 					// Note that when deprecatedEndpoint was found, its ref count
+ 					// must have necessarily been >=1, and after incrementing it
+ 					// must be >=2. The only way for the ref count to drop below 2 is
+@@ -484,9 +499,11 @@ func (a *AddressableEndpointState) acquirePrimaryAddressRLocked(isValid func(*ad
+ 					deprecatedEndpoint.decRefMustNotFree()
+ 				}
+ 
++				log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: post inc-ref returning %+v", ep)
+ 				return ep
+ 			}
+ 		} else if deprecatedEndpoint == nil && ep.IncRef() {
++			log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: deprecated ep %+v", ep)
+ 			// We prefer an endpoint that is not deprecated, but we keep track of
+ 			// ep in case a doesn't have any non-deprecated endpoints.
+ 			//
+@@ -496,6 +513,7 @@ func (a *AddressableEndpointState) acquirePrimaryAddressRLocked(isValid func(*ad
+ 		}
+ 	}
+ 
++	log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: returning deprecated ep %+v", deprecatedEndpoint)
+ 	return deprecatedEndpoint
+ }
+ 
+@@ -512,9 +530,13 @@ func (a *AddressableEndpointState) acquirePrimaryAddressRLocked(isValid func(*ad
+ // Regardless how the address was obtained, it will be acquired before it is
+ // returned.
+ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tcpip.Address, f func(AddressEndpoint) bool, allowTemp bool, tempPEB PrimaryEndpointBehavior) AddressEndpoint {
++	log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching")
+ 	lookup := func() *addressState {
++		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1")
+ 		if addrState, ok := a.endpoints[localAddr]; ok {
++			log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: found addrState")
+ 			if !addrState.IsAssigned(allowTemp) {
++				log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: addrState is not assigned")
+ 				return nil
+ 			}
+ 
+@@ -523,15 +545,19 @@ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tc
+ 			}
+ 
+ 			return addrState
++			log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: returning addrState %+v", addrState)
+ 		}
+ 
+ 		if f != nil {
++			log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: f != nil")
+ 			for _, addrState := range a.endpoints {
+ 				if addrState.IsAssigned(allowTemp) && f(addrState) && addrState.IncRef() {
++					log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: returning addrState %+v", addrState)
+ 					return addrState
+ 				}
+ 			}
+ 		}
++		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: returning nil")
+ 		return nil
+ 	}
+ 	// Avoid exclusive lock on mu unless we need to add a new address.
+@@ -540,10 +566,12 @@ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tc
+ 	a.mu.RUnlock()
+ 
+ 	if ep != nil {
++		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: lookup returned non-nil")
+ 		return ep
+ 	}
+ 
+ 	if !allowTemp {
++		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: !allowTemp")
+ 		return nil
+ 	}
+ 
+@@ -556,6 +584,7 @@ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tc
+ 	// we released and acquired the lock.
+ 	ep = lookup()
+ 	if ep != nil {
++		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: second lookup succeeded")
+ 		return ep
+ 	}
+ 
+@@ -584,8 +613,10 @@ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tc
+ 	// Since addAndAcquireAddressLocked returns a nil value with a non-nil type,
+ 	// we need to explicitly return nil below if ep is (a typed) nil.
+ 	if ep == nil {
++		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: ep == nil")
+ 		return nil
+ 	}
++	log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: returning ep %+v", ep)
+ 	return ep
+ }
+ 
+@@ -598,8 +629,10 @@ func (a *AddressableEndpointState) AcquireAssignedAddress(localAddr tcpip.Addres
+ func (a *AddressableEndpointState) AcquireOutgoingPrimaryAddress(remoteAddr tcpip.Address, allowExpired bool) AddressEndpoint {
+ 	a.mu.Lock()
+ 	defer a.mu.Unlock()
++	log.Infof("stack.AddressableEndpointState.AcquireOutgoingPrimaryAddress")
+ 
+ 	ep := a.acquirePrimaryAddressRLocked(func(ep *addressState) bool {
++		log.Infof("stack.AddressableEndpointState.AcquireOutgoingPrimaryAddress: func1")
+ 		return ep.IsAssigned(allowExpired)
+ 	})
+ 
+@@ -618,9 +651,11 @@ func (a *AddressableEndpointState) AcquireOutgoingPrimaryAddress(remoteAddr tcpi
+ 	// Since acquirePrimaryAddressLocked returns a nil value with a non-nil type,
+ 	// we need to explicitly return nil below if ep is (a typed) nil.
+ 	if ep == nil {
++		log.Infof("stack.AddressableEndpointState.AcquireOutgoingPrimaryAddress: ep is nil")
+ 		return nil
+ 	}
+ 
++	log.Infof("stack.AddressableEndpointState.AcquireOutgoingPrimaryAddress: ep is non-nil")
+ 	return ep
+ }
+ 
+@@ -769,12 +804,16 @@ func (a *addressState) remove(reason AddressRemovalReason) {
+ 
+ // IsAssigned implements AddressEndpoint.
+ func (a *addressState) IsAssigned(allowExpired bool) bool {
++	log.Infof("stack.addressState.IsAssigned(%t)", allowExpired)
+ 	switch kind := a.GetKind(); kind {
+ 	case PermanentTentative:
++		log.Infof("stack.addressState.IsAssigned: PermanentTentative")
+ 		return false
+ 	case PermanentExpired:
++		log.Infof("stack.addressState.IsAssigned: PermanentExpired")
+ 		return allowExpired
+ 	case Permanent, Temporary:
++		log.Infof("stack.addressState.IsAssigned: Permanent or Temporary")
+ 		return true
+ 	default:
+ 		panic(fmt.Sprintf("address %s has unknown kind %d", a.AddressWithPrefix(), kind))
+diff --git a/pkg/tcpip/stack/nic.go b/pkg/tcpip/stack/nic.go
+index bafe633d5..3322d4efe 100644
+--- a/pkg/tcpip/stack/nic.go
++++ b/pkg/tcpip/stack/nic.go
+@@ -19,6 +19,7 @@ import (
+ 	"reflect"
+ 
+ 	"gvisor.dev/gvisor/pkg/atomicbitops"
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/tcpip"
+ 	"gvisor.dev/gvisor/pkg/tcpip/header"
+ )
+@@ -414,13 +415,17 @@ func (n *nic) Spoofing() bool {
+ // primaryAddress returns an address that can be used to communicate with
+ // remoteAddr.
+ func (n *nic) primaryEndpoint(protocol tcpip.NetworkProtocolNumber, remoteAddr tcpip.Address) AssignableAddressEndpoint {
++	log.Infof("stack.nic.primaryEndpoint")
+ 	ep := n.getNetworkEndpoint(protocol)
+ 	if ep == nil {
++		log.Infof("stack.nic.primaryEndpoint: no endpoint")
+ 		return nil
+ 	}
++	log.Infof("stack.nic.primaryEndpoint: ep has type %T", ep)
+ 
+ 	addressableEndpoint, ok := ep.(AddressableEndpoint)
+ 	if !ok {
++		log.Infof("stack.nic.primaryEndpoint: ep is not addressable")
+ 		return nil
+ 	}
+ 
+@@ -455,6 +460,7 @@ func (n *nic) hasAddress(protocol tcpip.NetworkProtocolNumber, addr tcpip.Addres
+ 
+ // findEndpoint finds the endpoint, if any, with the given address.
+ func (n *nic) findEndpoint(protocol tcpip.NetworkProtocolNumber, address tcpip.Address, peb PrimaryEndpointBehavior) AssignableAddressEndpoint {
++	log.Infof("stack.nic.findEndpoint")
+ 	return n.getAddressOrCreateTemp(protocol, address, peb, spoofing)
+ }
+ 
+@@ -468,6 +474,7 @@ func (n *nic) findEndpoint(protocol tcpip.NetworkProtocolNumber, address tcpip.A
+ // If the address is the IPv4 broadcast address for an endpoint's network, that
+ // endpoint will be returned.
+ func (n *nic) getAddressOrCreateTemp(protocol tcpip.NetworkProtocolNumber, address tcpip.Address, peb PrimaryEndpointBehavior, tempRef getAddressBehaviour) AssignableAddressEndpoint {
++	log.Infof("stack.nic.getAddressOrCreateTemp")
+ 	var spoofingOrPromiscuous bool
+ 	switch tempRef {
+ 	case spoofing:
+@@ -475,6 +482,7 @@ func (n *nic) getAddressOrCreateTemp(protocol tcpip.NetworkProtocolNumber, addre
+ 	case promiscuous:
+ 		spoofingOrPromiscuous = n.Promiscuous()
+ 	}
++	log.Infof("stack.nic.getAddressOrCreateTemp: spoofingOrPromiscuous: %t", spoofingOrPromiscuous)
+ 	return n.getAddressOrCreateTempInner(protocol, address, spoofingOrPromiscuous, peb)
+ }
+ 
+@@ -483,11 +491,13 @@ func (n *nic) getAddressOrCreateTemp(protocol tcpip.NetworkProtocolNumber, addre
+ func (n *nic) getAddressOrCreateTempInner(protocol tcpip.NetworkProtocolNumber, address tcpip.Address, createTemp bool, peb PrimaryEndpointBehavior) AssignableAddressEndpoint {
+ 	ep := n.getNetworkEndpoint(protocol)
+ 	if ep == nil {
++		log.Infof("stack.nic.getAddressOrCreateTempInner: failed to get network endpoint")
+ 		return nil
+ 	}
+ 
+ 	addressableEndpoint, ok := ep.(AddressableEndpoint)
+ 	if !ok {
++		log.Infof("stack.nic.getAddressOrCreateTempInner: not an AddressableEndpoint: has type %T", addressableEndpoint)
+ 		return nil
+ 	}
+ 
+diff --git a/pkg/tcpip/stack/stack.go b/pkg/tcpip/stack/stack.go
+index 762dd1e7b..bd421e624 100644
+--- a/pkg/tcpip/stack/stack.go
++++ b/pkg/tcpip/stack/stack.go
+@@ -1167,9 +1167,12 @@ func (s *Stack) GetMainNICAddress(id tcpip.NICID, protocol tcpip.NetworkProtocol
+ }
+ 
+ func (s *Stack) getAddressEP(nic *nic, localAddr, remoteAddr tcpip.Address, netProto tcpip.NetworkProtocolNumber) AssignableAddressEndpoint {
++	log.Infof("stack.Stack.getAddressEP")
+ 	if len(localAddr) == 0 {
++		log.Infof("stack.Stack.getAddressEP: localAddr has len 0")
+ 		return nic.primaryEndpoint(netProto, remoteAddr)
+ 	}
++	log.Infof("stack.Stack.getAddressEP: localAddr has len > 0")
+ 	return nic.findEndpoint(netProto, localAddr, CanBePrimaryEndpoint)
+ }
+ 
+@@ -1304,6 +1307,7 @@ func isNICForwarding(nic *nic, proto tcpip.NetworkProtocolNumber) bool {
+ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, netProto tcpip.NetworkProtocolNumber, multicastLoop bool) (*Route, tcpip.Error) {
+ 	s.mu.RLock()
+ 	defer s.mu.RUnlock()
++	log.Infof("stack.Stack.FindRoute: id %d, localAddr: %v, remoteAddr %v, netProto %d, multicastLoop %t", id, localAddr, remoteAddr, netProto, multicastLoop)
+ 
+ 	isLinkLocal := header.IsV6LinkLocalUnicastAddress(remoteAddr) || header.IsV6LinkLocalMulticastAddress(remoteAddr)
+ 	isLocalBroadcast := remoteAddr == header.IPv4Broadcast
+@@ -1311,17 +1315,24 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
+ 	isLoopback := header.IsV4LoopbackAddress(remoteAddr) || header.IsV6LoopbackAddress(remoteAddr)
+ 	needRoute := !(isLocalBroadcast || isMulticast || isLinkLocal || isLoopback)
+ 
++	log.Infof("stack.Stack.FindRoute: isLinkLocal: %t, isLocalBroadcast: %t, isMulticast: %t, isLoopback: %t, needRoute: %t", isLinkLocal, isLocalBroadcast, isMulticast, isLoopback, needRoute)
++
+ 	if s.handleLocal && !isMulticast && !isLocalBroadcast {
++		log.Infof("stack.Stack.FindRoute: trying to handle local")
+ 		if r := s.findLocalRouteRLocked(id, localAddr, remoteAddr, netProto); r != nil {
++			log.Infof("stack.Stack.FindRoute: succeeding in handling local")
+ 			return r, nil
+ 		}
++		log.Infof("stack.Stack.FindRoute: failed to handle local")
+ 	}
+ 
+ 	// If the interface is specified and we do not need a route, return a route
+ 	// through the interface if the interface is valid and enabled.
+ 	if id != 0 && !needRoute {
++		log.Infof("stack.Stack.FindRoute: interface specified and we don't need a route")
+ 		if nic, ok := s.nics[id]; ok && nic.Enabled() {
+ 			if addressEndpoint := s.getAddressEP(nic, localAddr, remoteAddr, netProto); addressEndpoint != nil {
++				log.Infof("stack.Stack.FindRoute: making a route for interface that doesn't need route")
+ 				return makeRoute(
+ 					netProto,
+ 					"", /* gateway */
+@@ -1333,12 +1344,18 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
+ 					s.handleLocal,
+ 					multicastLoop,
+ 				), nil
++			} else {
++				log.Infof("stack.Stack.FindRoute: failed to get an addressable endopint")
+ 			}
++		} else {
++			log.Infof("stack.Stack.FindRoute: failed to get nic with id %d: ok is %t and nic.Enabled() is %t", id, ok, nic.Enabled())
+ 		}
+ 
+ 		if isLoopback {
++			log.Infof("stack.Stack.FindRoute: isLoopback.")
+ 			return nil, &tcpip.ErrBadLocalAddress{}
+ 		}
++		log.Infof("stack.Stack.FindRoute: unreachable")
+ 		return nil, &tcpip.ErrNetworkUnreachable{}
+ 	}
+ 
+@@ -1440,9 +1457,11 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
+ 		return nil, &tcpip.ErrHostUnreachable{}
+ 	}
+ 	if header.IsV6LoopbackAddress(remoteAddr) {
++		log.Infof("stack.Stack.FindRoute: remote is v6 loopback address")
+ 		return nil, &tcpip.ErrBadLocalAddress{}
+ 	}
+ 	// TODO(https://gvisor.dev/issues/8105): This should be ErrNetworkUnreachable.
++	log.Infof("stack.Stack.FindRoute: final errnetworkunreachable")
+ 	return nil, &tcpip.ErrNetworkUnreachable{}
+ }
+ 
+@@ -1780,16 +1799,20 @@ func (s *Stack) Pause() {
+ // Resume restarts the stack after a restore. This must be called after the
+ // entire system has been restored.
+ func (s *Stack) Resume() {
++	log.Infof("stack.Stack.Resume")
+ 	// ResumableEndpoint.Resume() may call other methods on s, so we can't hold
+ 	// s.mu while resuming the endpoints.
+ 	s.mu.Lock()
+ 	eps := s.resumableEndpoints
+ 	s.resumableEndpoints = nil
+ 	s.mu.Unlock()
++	log.Infof("stack.Stack.Resume: resuming endpoints")
+ 	for _, e := range eps {
++		log.Infof("stack.Stack.Resume: resuming endpoint of type %T", e)
+ 		e.Resume(s)
+ 	}
+ 	// Now resume any protocol level background workers.
++	log.Infof("stack.Stack.Resume: resuming protocols")
+ 	for _, p := range s.transportProtocols {
+ 		p.proto.Resume()
+ 	}
+diff --git a/pkg/tcpip/transport/tcp/dispatcher.go b/pkg/tcpip/transport/tcp/dispatcher.go
+index 1c7a3c44e..40757a87d 100644
+--- a/pkg/tcpip/transport/tcp/dispatcher.go
++++ b/pkg/tcpip/transport/tcp/dispatcher.go
+@@ -19,6 +19,7 @@ import (
+ 	"fmt"
+ 	"math/rand"
+ 
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/sleep"
+ 	"gvisor.dev/gvisor/pkg/sync"
+ 	"gvisor.dev/gvisor/pkg/tcpip"
+@@ -474,9 +475,11 @@ func (d *dispatcher) pause() {
+ // resume resumes a previously paused dispatcher and its processor goroutines.
+ // Calling resume on a dispatcher that was never paused is a no-op.
+ func (d *dispatcher) resume() {
++	log.Infof("tcp.dispatcher.resume")
+ 	d.mu.Lock()
+ 
+ 	if !d.paused {
++		log.Infof("tcp.dispatcher.resume: not paused")
+ 		// If this was a restore run the stack is a new instance and
+ 		// it was never paused, so just return as there is nothing to
+ 		// resume.
+@@ -485,9 +488,11 @@ func (d *dispatcher) resume() {
+ 	}
+ 	d.paused = false
+ 	d.mu.Unlock()
++	log.Infof("tcp.dispatcher.resume: resuming processors")
+ 	for i := range d.processors {
+ 		d.processors[i].resume()
+ 	}
++	log.Infof("tcp.dispatcher.resume: done")
+ }
+ 
+ // jenkinsHasher contains state needed to for a jenkins hash.
+diff --git a/pkg/tcpip/transport/tcp/endpoint.go b/pkg/tcpip/transport/tcp/endpoint.go
+index 271543eb2..6704a5a21 100644
+--- a/pkg/tcpip/transport/tcp/endpoint.go
++++ b/pkg/tcpip/transport/tcp/endpoint.go
+@@ -26,6 +26,7 @@ import (
+ 
+ 	"gvisor.dev/gvisor/pkg/atomicbitops"
+ 	"gvisor.dev/gvisor/pkg/bufferv2"
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/sleep"
+ 	"gvisor.dev/gvisor/pkg/sync"
+ 	"gvisor.dev/gvisor/pkg/tcpip"
+@@ -2358,14 +2359,17 @@ func (e *endpoint) registerEndpoint(addr tcpip.FullAddress, netProto tcpip.Netwo
+ // connect connects the endpoint to its peer.
+ // +checklocks:e.mu
+ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
++	log.Infof("tcp.endpoint.connect")
+ 	connectingAddr := addr.Addr
+ 
+ 	addr, netProto, err := e.checkV4MappedLocked(addr)
+ 	if err != nil {
++		log.Infof("tcp.endpoint.connect: mapped addr error")
+ 		return err
+ 	}
+ 
+ 	if e.EndpointState().connected() {
++		log.Infof("tcp.endpoint.connect: connected")
+ 		// The endpoint is already connected. If caller hasn't been
+ 		// notified yet, return success.
+ 		if !e.isConnectNotified {
+@@ -2379,39 +2383,48 @@ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
+ 	nicID := addr.NIC
+ 	switch e.EndpointState() {
+ 	case StateBound:
++		log.Infof("tcp.endpoint.connect: bound")
+ 		// If we're already bound to a NIC but the caller is requesting
+ 		// that we use a different one now, we cannot proceed.
+ 		if e.boundNICID == 0 {
++			log.Infof("tcp.endpoint.connect: bound: nicid 0")
+ 			break
+ 		}
+ 
+ 		if nicID != 0 && nicID != e.boundNICID {
++			log.Infof("tcp.endpoint.connect: bound: unreachable")
+ 			return &tcpip.ErrHostUnreachable{}
+ 		}
+ 
+ 		nicID = e.boundNICID
+ 
+ 	case StateInitial:
++		log.Infof("tcp.endpoint.connect: initial")
+ 		// Nothing to do. We'll eventually fill-in the gaps in the ID (if any)
+ 		// when we find a route.
+ 
+ 	case StateConnecting, StateSynSent, StateSynRecv:
++		log.Infof("tcp.endpoint.connect: connecting")
+ 		// A connection request has already been issued but hasn't completed
+ 		// yet.
+ 		return &tcpip.ErrAlreadyConnecting{}
+ 
+ 	case StateError:
++		log.Infof("tcp.endpoint.connect: error")
+ 		if err := e.hardErrorLocked(); err != nil {
+ 			return err
+ 		}
+ 		return &tcpip.ErrConnectionAborted{}
+ 
+ 	default:
++		log.Infof("tcp.endpoint.connect: invalid")
+ 		return &tcpip.ErrInvalidEndpointState{}
+ 	}
+ 
+ 	// Find a route to the desired destination.
++	log.Infof("tcp.endpoint.connect: FindRoute")
+ 	r, err := e.stack.FindRoute(nicID, e.TransportEndpointInfo.ID.LocalAddress, addr.Addr, netProto, false /* multicastLoop */)
++	log.Infof("tcp.endpoint.connect: finished FindRoute")
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -2423,6 +2436,7 @@ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
+ 
+ 	oldState := e.EndpointState()
+ 	e.setEndpointState(StateConnecting)
++	log.Infof("tcp.endpoint.connect: registering endpoint")
+ 	if err := e.registerEndpoint(addr, netProto, r.NICID()); err != nil {
+ 		e.setEndpointState(oldState)
+ 		return err
+@@ -2440,6 +2454,7 @@ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
+ 	// Connect in the restore phase does not perform handshake. Restore its
+ 	// connection setting here.
+ 	if !handshake {
++		log.Infof("tcp.endpoint.connect: notifying for segments in th send queue")
+ 		e.segmentQueue.mu.Lock()
+ 		for _, l := range []segmentList{e.segmentQueue.list, e.snd.writeList} {
+ 			for s := l.Front(); s != nil; s = s.Next() {
+@@ -2454,10 +2469,12 @@ func (e *endpoint) connect(addr tcpip.FullAddress, handshake bool) tcpip.Error {
+ 		// Set the new auto tuned send buffer size after entering
+ 		// established state.
+ 		e.ops.SetSendBufferSize(e.computeTCPSendBufferSize(), false /* notify */)
++		log.Infof("tcp.endpoint.connect: !handshake done")
+ 		return &tcpip.ErrConnectStarted{}
+ 	}
+ 
+ 	// Start a new handshake.
++	log.Infof("tcp.endpoint.connect: starting a new handshake")
+ 	h := e.newHandshake()
+ 	e.setEndpointState(StateSynSent)
+ 	h.start()
+diff --git a/pkg/tcpip/transport/tcp/endpoint_state.go b/pkg/tcpip/transport/tcp/endpoint_state.go
+index dbf636100..f854b7768 100644
+--- a/pkg/tcpip/transport/tcp/endpoint_state.go
++++ b/pkg/tcpip/transport/tcp/endpoint_state.go
+@@ -18,6 +18,7 @@ import (
+ 	"fmt"
+ 
+ 	"gvisor.dev/gvisor/pkg/atomicbitops"
++	"gvisor.dev/gvisor/pkg/log"
+ 	"gvisor.dev/gvisor/pkg/sync"
+ 	"gvisor.dev/gvisor/pkg/tcpip"
+ 	"gvisor.dev/gvisor/pkg/tcpip/header"
+@@ -120,10 +121,13 @@ func (e *endpoint) afterLoad() {
+ 
+ // Resume implements tcpip.ResumableEndpoint.Resume.
+ func (e *endpoint) Resume(s *stack.Stack) {
++	log.Infof("tcp.endpoint.Resume")
+ 	if !e.EndpointState().closed() {
++		log.Infof("tcp.endpoint.Resume: init keepalive timer")
+ 		e.keepalive.timer.init(s.Clock(), maybeFailTimerHandler(e, e.keepaliveTimerExpired))
+ 	}
+ 	if snd := e.snd; snd != nil {
++		log.Infof("tcp.endpoint.Resume: init several timers")
+ 		snd.resendTimer.init(s.Clock(), maybeFailTimerHandler(e, e.snd.retransmitTimerExpired))
+ 		snd.reorderTimer.init(s.Clock(), timerHandler(e, e.snd.rc.reorderTimerExpired))
+ 		snd.probeTimer.init(s.Clock(), timerHandler(e, e.snd.probeTimerExpired))
+@@ -134,6 +138,7 @@ func (e *endpoint) Resume(s *stack.Stack) {
+ 	e.segmentQueue.thaw()
+ 
+ 	bind := func() {
++		log.Infof("tcp.endpoint.Resume: func1")
+ 		e.mu.Lock()
+ 		defer e.mu.Unlock()
+ 		addr, _, err := e.checkV4MappedLocked(tcpip.FullAddress{Addr: e.BindAddr, Port: e.TransportEndpointInfo.ID.LocalPort})
+@@ -149,6 +154,7 @@ func (e *endpoint) Resume(s *stack.Stack) {
+ 			BindToDevice: e.boundBindToDevice,
+ 			Dest:         e.boundDest,
+ 		}
++		log.Infof("tcp.endpoint.Resume: func1: reserving port")
+ 		if ok := e.stack.ReserveTuple(portRes); !ok {
+ 			panic(fmt.Sprintf("unable to re-reserve tuple (%v, %q, %d, %+v, %d, %v)", e.effectiveNetProtos, addr.Addr, addr.Port, e.boundPortFlags, e.boundBindToDevice, e.boundDest))
+ 		}
+@@ -156,12 +162,15 @@ func (e *endpoint) Resume(s *stack.Stack) {
+ 
+ 		// Mark endpoint as bound.
+ 		e.setEndpointState(StateBound)
++		log.Infof("tcp.endpoint.Resume: func1: done")
+ 	}
+ 
+ 	epState := EndpointState(e.origEndpointState)
+ 	switch {
+ 	case epState.connected():
++		log.Infof("tcp.endpoint.Resume: connected")
+ 		bind()
++		log.Infof("tcp.endpoint.Resume: connected: bound")
+ 		if len(e.connectingAddress) == 0 {
+ 			e.connectingAddress = e.TransportEndpointInfo.ID.RemoteAddress
+ 			// This endpoint is accepted by netstack but not yet by
+@@ -176,23 +185,31 @@ func (e *endpoint) Resume(s *stack.Stack) {
+ 		// we do not restore SACK information.
+ 		e.scoreboard.Reset()
+ 		e.mu.Lock()
++		log.Infof("tcp.endpoint.Resume: connected: calling connect")
+ 		err := e.connect(tcpip.FullAddress{NIC: e.boundNICID, Addr: e.connectingAddress, Port: e.TransportEndpointInfo.ID.RemotePort}, false /* handshake */)
+ 		if _, ok := err.(*tcpip.ErrConnectStarted); !ok {
++			log.Infof("tcp.endpoint.Resume: connected: connecting failed: %v", err)
+ 			panic("endpoint connecting failed: " + err.String())
+ 		}
+ 		e.state.Store(e.origEndpointState)
++		log.Infof("stored state")
+ 		// For FIN-WAIT-2 and TIME-WAIT we need to start the appropriate timers so
+ 		// that the socket is closed correctly.
+ 		switch epState {
+ 		case StateFinWait2:
++			log.Infof("tcp.endpoint.Resume: setting finwait2 timer")
+ 			e.finWait2Timer = e.stack.Clock().AfterFunc(e.tcpLingerTimeout, e.finWait2TimerExpired)
+ 		case StateTimeWait:
++			log.Infof("tcp.endpoint.Resume: setting finwait timer")
+ 			e.timeWaitTimer = e.stack.Clock().AfterFunc(e.getTimeWaitDuration(), e.timeWaitTimerExpired)
+ 		}
+ 
+ 		e.mu.Unlock()
++		log.Infof("tcp.endpoint.Resume: unlocked")
+ 		connectedLoading.Done()
++		log.Infof("tcp.endpoint.Resume: connected: done")
+ 	case epState == StateListen:
++		log.Infof("tcp.endpoint.Resume: listen")
+ 		tcpip.AsyncLoading.Add(1)
+ 		go func() {
+ 			connectedLoading.Wait()
+@@ -200,32 +217,39 @@ func (e *endpoint) Resume(s *stack.Stack) {
+ 			e.acceptMu.Lock()
+ 			backlog := e.acceptQueue.capacity
+ 			e.acceptMu.Unlock()
++			log.Infof("tcp.endpoint.Resume: listen: calling Listen")
+ 			if err := e.Listen(backlog); err != nil {
+ 				panic("endpoint listening failed: " + err.String())
+ 			}
+ 			e.LockUser()
+ 			if e.shutdownFlags != 0 {
++				log.Infof("tcp.endpoint.Resume: listen: shutting down")
+ 				e.shutdownLocked(e.shutdownFlags)
+ 			}
+ 			e.UnlockUser()
+ 			listenLoading.Done()
+ 			tcpip.AsyncLoading.Done()
++			log.Infof("tcp.endpoint.Resume: listen: done")
+ 		}()
+ 	case epState == StateConnecting:
++		log.Infof("tcp.endpoint.Resume: connecting")
+ 		// Initial SYN hasn't been sent yet so initiate a connect.
+ 		tcpip.AsyncLoading.Add(1)
+ 		go func() {
+ 			connectedLoading.Wait()
+ 			listenLoading.Wait()
+ 			bind()
++			log.Infof("tcp.endpoint.Resume: func: calling connect")
+ 			err := e.Connect(tcpip.FullAddress{NIC: e.boundNICID, Addr: e.connectingAddress, Port: e.TransportEndpointInfo.ID.RemotePort})
+ 			if _, ok := err.(*tcpip.ErrConnectStarted); !ok {
+ 				panic("endpoint connecting failed: " + err.String())
+ 			}
+ 			connectingLoading.Done()
+ 			tcpip.AsyncLoading.Done()
++			log.Infof("tcp.endpoint.Resume: func: calling done")
+ 		}()
+ 	case epState == StateSynSent || epState == StateSynRecv:
++		log.Infof("tcp.endpoint.Resume: syn sent or recvd")
+ 		connectedLoading.Wait()
+ 		listenLoading.Wait()
+ 		// Initial SYN has been sent/received so we should bind the
+@@ -246,7 +270,9 @@ func (e *endpoint) Resume(s *stack.Stack) {
+ 		}
+ 		e.h.retransmitTimer = timer
+ 		connectingLoading.Done()
++		log.Infof("tcp.endpoint.Resume: syn sent or recvd: done")
+ 	case epState == StateBound:
++		log.Infof("tcp.endpoint.Resume: bound")
+ 		tcpip.AsyncLoading.Add(1)
+ 		go func() {
+ 			connectedLoading.Wait()
+@@ -255,14 +281,19 @@ func (e *endpoint) Resume(s *stack.Stack) {
+ 			bind()
+ 			tcpip.AsyncLoading.Done()
+ 		}()
++		log.Infof("tcp.endpoint.Resume: bound: done")
+ 	case epState == StateClose:
++		log.Infof("tcp.endpoint.Resume: closed")
+ 		e.isPortReserved = false
+ 		e.state.Store(uint32(StateClose))
+ 		e.stack.CompleteTransportEndpointCleanup(e)
+ 		tcpip.DeleteDanglingEndpoint(e)
++		log.Infof("tcp.endpoint.Resume: closed: done")
+ 	case epState == StateError:
++		log.Infof("tcp.endpoint.Resume: error")
+ 		e.state.Store(uint32(StateError))
+ 		e.stack.CompleteTransportEndpointCleanup(e)
+ 		tcpip.DeleteDanglingEndpoint(e)
++		log.Infof("tcp.endpoint.Resume: error: done")
+ 	}
+ }
+diff --git a/runsc/boot/controller.go b/runsc/boot/controller.go
+index e3a22b952..38731a1d5 100644
+--- a/runsc/boot/controller.go
++++ b/runsc/boot/controller.go
+@@ -498,6 +498,7 @@ func (cm *containerManager) Restore(o *RestoreOpts, _ *struct{}) error {
+ 	if err := loadOpts.Load(ctx, k, nil, networkStack, time.NewCalibratedClocks(), &vfs.CompleteRestoreOptions{}); err != nil {
+ 		return err
+ 	}
++	log.Infof("controller.containerManager.Restore: finished loading. We shouldn't hit this!")
+ 
+ 	// Since we have a new kernel we also must make a new watchdog.
+ 	dogOpts := watchdog.DefaultOpts
