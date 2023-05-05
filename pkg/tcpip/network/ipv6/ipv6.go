@@ -26,6 +26,7 @@ import (
 
 	"gvisor.dev/gvisor/pkg/atomicbitops"
 	"gvisor.dev/gvisor/pkg/bufferv2"
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -2040,6 +2041,7 @@ func (e *endpoint) MainAddress() tcpip.AddressWithPrefix {
 
 // AcquireAssignedAddress implements stack.AddressableEndpoint.
 func (e *endpoint) AcquireAssignedAddress(localAddr tcpip.Address, allowTemp bool, tempPEB stack.PrimaryEndpointBehavior) stack.AddressEndpoint {
+	log.Infof("ipv6.endpoint.AcquireAssignedAddress")
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.acquireAddressOrCreateTempLocked(localAddr, allowTemp, tempPEB)
@@ -2085,6 +2087,7 @@ func (e *endpoint) getLinkLocalAddressRLocked() tcpip.Address {
 //
 // Precondition: e.mu must be read locked.
 func (e *endpoint) acquireOutgoingPrimaryAddressRLocked(remoteAddr tcpip.Address, allowExpired bool) stack.AddressEndpoint {
+	log.Infof("ipv6.endpoint.acquireOutgoingPrimaryAddressRLocked")
 	// addrCandidate is a candidate for Source Address Selection, as per
 	// RFC 6724 section 5.
 	type addrCandidate struct {

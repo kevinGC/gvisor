@@ -17,6 +17,7 @@ package stack
 import (
 	"fmt"
 
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/tcpip"
 )
 
@@ -199,13 +200,16 @@ func (a *AddressableEndpointState) AddAndAcquireAddress(addr tcpip.AddressWithPr
 //
 // +checklocks:a.mu
 func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.AddressWithPrefix, properties AddressProperties, kind AddressKind) (*addressState, tcpip.Error) {
+	log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked")
 	var permanent bool
 	switch kind {
 	case PermanentExpired:
 		panic(fmt.Sprintf("cannot add address %s in PermanentExpired state", addr))
 	case Permanent, PermanentTentative:
+		log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: PermanentTentative or Permanent")
 		permanent = true
 	case Temporary:
+		log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: Temporary")
 	default:
 		panic(fmt.Sprintf("unknown address kind: %d", kind))
 	}
@@ -214,7 +218,9 @@ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.Address
 	attemptAddToPrimary := true
 	addrState, ok := a.endpoints[addr.Address]
 	if ok {
+		log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: found addrState")
 		if !permanent {
+			log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: non-permanent already exists")
 			// We are adding a non-permanent address but the address exists. No need
 			// to go any further since we can only promote existing temporary/expired
 			// addresses to permanent.
@@ -231,6 +237,7 @@ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.Address
 		if isPermanent {
 			// We are adding a permanent address but a permanent address already
 			// exists.
+			log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: permanent already exists")
 			return nil, &tcpip.ErrDuplicateAddress{}
 		}
 
@@ -258,6 +265,7 @@ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.Address
 		}
 		addrState.refs.IncRef()
 	} else {
+		log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: didn't find addrState")
 		addrState = &addressState{
 			addressableEndpointState: a,
 			addr:                     addr,
@@ -321,6 +329,7 @@ func (a *AddressableEndpointState) addAndAcquireAddressLocked(addr tcpip.Address
 	}
 
 	addrState.notifyChangedLocked()
+	log.Infof("stack.AddressableEndpointState.addAndAcquireAddressLocked: ending with return of %+v", addrState)
 	return addrState, nil
 }
 
@@ -462,19 +471,25 @@ func (a *AddressableEndpointState) MainAddress() tcpip.AddressWithPrefix {
 //
 // +checklocksread:a.mu
 func (a *AddressableEndpointState) acquirePrimaryAddressRLocked(isValid func(*addressState) bool) *addressState {
+	log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked")
 	var deprecatedEndpoint *addressState
 	for _, ep := range a.primary {
 		if !isValid(ep) {
+			log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: invalid: %+v", ep)
 			continue
 		}
+		log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: valid: %+v", ep)
 
 		if !ep.Deprecated() {
+			log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: not deprecated")
 			if ep.IncRef() {
+				log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: IncRef'd")
 				// ep is not deprecated, so return it immediately.
 				//
 				// If we kept track of a deprecated endpoint, decrement its reference
 				// count since it was incremented when we decided to keep track of it.
 				if deprecatedEndpoint != nil {
+					log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: deprecated non nil")
 					// Note that when deprecatedEndpoint was found, its ref count
 					// must have necessarily been >=1, and after incrementing it
 					// must be >=2. The only way for the ref count to drop below 2 is
@@ -484,9 +499,11 @@ func (a *AddressableEndpointState) acquirePrimaryAddressRLocked(isValid func(*ad
 					deprecatedEndpoint.decRefMustNotFree()
 				}
 
+				log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: post inc-ref returning %+v", ep)
 				return ep
 			}
 		} else if deprecatedEndpoint == nil && ep.IncRef() {
+			log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: deprecated ep %+v", ep)
 			// We prefer an endpoint that is not deprecated, but we keep track of
 			// ep in case a doesn't have any non-deprecated endpoints.
 			//
@@ -496,6 +513,7 @@ func (a *AddressableEndpointState) acquirePrimaryAddressRLocked(isValid func(*ad
 		}
 	}
 
+	log.Infof("stack.AddressableEndpointState.acquirePrimaryAddressRLocked: returning deprecated ep %+v", deprecatedEndpoint)
 	return deprecatedEndpoint
 }
 
@@ -512,9 +530,13 @@ func (a *AddressableEndpointState) acquirePrimaryAddressRLocked(isValid func(*ad
 // Regardless how the address was obtained, it will be acquired before it is
 // returned.
 func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tcpip.Address, f func(AddressEndpoint) bool, allowTemp bool, tempPEB PrimaryEndpointBehavior) AddressEndpoint {
+	log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching")
 	lookup := func() *addressState {
+		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1")
 		if addrState, ok := a.endpoints[localAddr]; ok {
+			log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: found addrState")
 			if !addrState.IsAssigned(allowTemp) {
+				log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: addrState is not assigned")
 				return nil
 			}
 
@@ -523,15 +545,19 @@ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tc
 			}
 
 			return addrState
+			log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: returning addrState %+v", addrState)
 		}
 
 		if f != nil {
+			log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: f != nil")
 			for _, addrState := range a.endpoints {
 				if addrState.IsAssigned(allowTemp) && f(addrState) && addrState.IncRef() {
+					log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: returning addrState %+v", addrState)
 					return addrState
 				}
 			}
 		}
+		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: func1: returning nil")
 		return nil
 	}
 	// Avoid exclusive lock on mu unless we need to add a new address.
@@ -540,10 +566,12 @@ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tc
 	a.mu.RUnlock()
 
 	if ep != nil {
+		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: lookup returned non-nil")
 		return ep
 	}
 
 	if !allowTemp {
+		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: !allowTemp")
 		return nil
 	}
 
@@ -556,6 +584,7 @@ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tc
 	// we released and acquired the lock.
 	ep = lookup()
 	if ep != nil {
+		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: second lookup succeeded")
 		return ep
 	}
 
@@ -584,8 +613,10 @@ func (a *AddressableEndpointState) AcquireAssignedAddressOrMatching(localAddr tc
 	// Since addAndAcquireAddressLocked returns a nil value with a non-nil type,
 	// we need to explicitly return nil below if ep is (a typed) nil.
 	if ep == nil {
+		log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: ep == nil")
 		return nil
 	}
+	log.Infof("stack.AddressableEndpointState.AcquireAssignedAddressOrMatching: returning ep %+v", ep)
 	return ep
 }
 
@@ -598,8 +629,10 @@ func (a *AddressableEndpointState) AcquireAssignedAddress(localAddr tcpip.Addres
 func (a *AddressableEndpointState) AcquireOutgoingPrimaryAddress(remoteAddr tcpip.Address, allowExpired bool) AddressEndpoint {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	log.Infof("stack.AddressableEndpointState.AcquireOutgoingPrimaryAddress")
 
 	ep := a.acquirePrimaryAddressRLocked(func(ep *addressState) bool {
+		log.Infof("stack.AddressableEndpointState.AcquireOutgoingPrimaryAddress: func1")
 		return ep.IsAssigned(allowExpired)
 	})
 
@@ -618,9 +651,11 @@ func (a *AddressableEndpointState) AcquireOutgoingPrimaryAddress(remoteAddr tcpi
 	// Since acquirePrimaryAddressLocked returns a nil value with a non-nil type,
 	// we need to explicitly return nil below if ep is (a typed) nil.
 	if ep == nil {
+		log.Infof("stack.AddressableEndpointState.AcquireOutgoingPrimaryAddress: ep is nil")
 		return nil
 	}
 
+	log.Infof("stack.AddressableEndpointState.AcquireOutgoingPrimaryAddress: ep is non-nil")
 	return ep
 }
 
@@ -769,12 +804,16 @@ func (a *addressState) remove(reason AddressRemovalReason) {
 
 // IsAssigned implements AddressEndpoint.
 func (a *addressState) IsAssigned(allowExpired bool) bool {
+	log.Infof("stack.addressState.IsAssigned(%t)", allowExpired)
 	switch kind := a.GetKind(); kind {
 	case PermanentTentative:
+		log.Infof("stack.addressState.IsAssigned: PermanentTentative")
 		return false
 	case PermanentExpired:
+		log.Infof("stack.addressState.IsAssigned: PermanentExpired")
 		return allowExpired
 	case Permanent, Temporary:
+		log.Infof("stack.addressState.IsAssigned: Permanent or Temporary")
 		return true
 	default:
 		panic(fmt.Sprintf("address %s has unknown kind %d", a.AddressWithPrefix(), kind))

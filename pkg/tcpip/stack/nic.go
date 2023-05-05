@@ -19,6 +19,7 @@ import (
 	"reflect"
 
 	"gvisor.dev/gvisor/pkg/atomicbitops"
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 )
@@ -414,13 +415,17 @@ func (n *nic) Spoofing() bool {
 // primaryAddress returns an address that can be used to communicate with
 // remoteAddr.
 func (n *nic) primaryEndpoint(protocol tcpip.NetworkProtocolNumber, remoteAddr tcpip.Address) AssignableAddressEndpoint {
+	log.Infof("stack.nic.primaryEndpoint")
 	ep := n.getNetworkEndpoint(protocol)
 	if ep == nil {
+		log.Infof("stack.nic.primaryEndpoint: no endpoint")
 		return nil
 	}
+	log.Infof("stack.nic.primaryEndpoint: ep has type %T", ep)
 
 	addressableEndpoint, ok := ep.(AddressableEndpoint)
 	if !ok {
+		log.Infof("stack.nic.primaryEndpoint: ep is not addressable")
 		return nil
 	}
 
@@ -455,6 +460,7 @@ func (n *nic) hasAddress(protocol tcpip.NetworkProtocolNumber, addr tcpip.Addres
 
 // findEndpoint finds the endpoint, if any, with the given address.
 func (n *nic) findEndpoint(protocol tcpip.NetworkProtocolNumber, address tcpip.Address, peb PrimaryEndpointBehavior) AssignableAddressEndpoint {
+	log.Infof("stack.nic.findEndpoint")
 	return n.getAddressOrCreateTemp(protocol, address, peb, spoofing)
 }
 
@@ -468,6 +474,7 @@ func (n *nic) findEndpoint(protocol tcpip.NetworkProtocolNumber, address tcpip.A
 // If the address is the IPv4 broadcast address for an endpoint's network, that
 // endpoint will be returned.
 func (n *nic) getAddressOrCreateTemp(protocol tcpip.NetworkProtocolNumber, address tcpip.Address, peb PrimaryEndpointBehavior, tempRef getAddressBehaviour) AssignableAddressEndpoint {
+	log.Infof("stack.nic.getAddressOrCreateTemp")
 	var spoofingOrPromiscuous bool
 	switch tempRef {
 	case spoofing:
@@ -475,6 +482,7 @@ func (n *nic) getAddressOrCreateTemp(protocol tcpip.NetworkProtocolNumber, addre
 	case promiscuous:
 		spoofingOrPromiscuous = n.Promiscuous()
 	}
+	log.Infof("stack.nic.getAddressOrCreateTemp: spoofingOrPromiscuous: %t", spoofingOrPromiscuous)
 	return n.getAddressOrCreateTempInner(protocol, address, spoofingOrPromiscuous, peb)
 }
 
@@ -483,11 +491,13 @@ func (n *nic) getAddressOrCreateTemp(protocol tcpip.NetworkProtocolNumber, addre
 func (n *nic) getAddressOrCreateTempInner(protocol tcpip.NetworkProtocolNumber, address tcpip.Address, createTemp bool, peb PrimaryEndpointBehavior) AssignableAddressEndpoint {
 	ep := n.getNetworkEndpoint(protocol)
 	if ep == nil {
+		log.Infof("stack.nic.getAddressOrCreateTempInner: failed to get network endpoint")
 		return nil
 	}
 
 	addressableEndpoint, ok := ep.(AddressableEndpoint)
 	if !ok {
+		log.Infof("stack.nic.getAddressOrCreateTempInner: not an AddressableEndpoint: has type %T", addressableEndpoint)
 		return nil
 	}
 

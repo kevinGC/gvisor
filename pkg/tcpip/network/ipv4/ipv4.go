@@ -23,6 +23,7 @@ import (
 
 	"gvisor.dev/gvisor/pkg/atomicbitops"
 	"gvisor.dev/gvisor/pkg/bufferv2"
+	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -1400,14 +1401,17 @@ func (e *endpoint) MainAddress() tcpip.AddressWithPrefix {
 
 // AcquireAssignedAddress implements stack.AddressableEndpoint.
 func (e *endpoint) AcquireAssignedAddress(localAddr tcpip.Address, allowTemp bool, tempPEB stack.PrimaryEndpointBehavior) stack.AddressEndpoint {
+	log.Infof("ipv4.endpoint.AcquireAssignedAddress")
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	loopback := e.nic.IsLoopback()
+	log.Infof("ipv4.endpoint.AcquireAssignedAddress: loopback: %t", loopback)
 	return e.addressableEndpointState.AcquireAssignedAddressOrMatching(localAddr, func(addressEndpoint stack.AddressEndpoint) bool {
 		subnet := addressEndpoint.Subnet()
 		// IPv4 has a notion of a subnet broadcast address and considers the
 		// loopback interface bound to an address's whole subnet (on linux).
+		log.Infof("ipv4.endpoint.AcquireAssignedAddress: func1: %T %T", subnet.IsBroadcast(localAddr), subnet.Contains(localAddr))
 		return subnet.IsBroadcast(localAddr) || (loopback && subnet.Contains(localAddr))
 	}, allowTemp, tempPEB)
 }

@@ -1167,9 +1167,12 @@ func (s *Stack) GetMainNICAddress(id tcpip.NICID, protocol tcpip.NetworkProtocol
 }
 
 func (s *Stack) getAddressEP(nic *nic, localAddr, remoteAddr tcpip.Address, netProto tcpip.NetworkProtocolNumber) AssignableAddressEndpoint {
+	log.Infof("stack.Stack.getAddressEP")
 	if len(localAddr) == 0 {
+		log.Infof("stack.Stack.getAddressEP: localAddr has len 0")
 		return nic.primaryEndpoint(netProto, remoteAddr)
 	}
+	log.Infof("stack.Stack.getAddressEP: localAddr has len > 0")
 	return nic.findEndpoint(netProto, localAddr, CanBePrimaryEndpoint)
 }
 
@@ -1304,6 +1307,7 @@ func isNICForwarding(nic *nic, proto tcpip.NetworkProtocolNumber) bool {
 func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, netProto tcpip.NetworkProtocolNumber, multicastLoop bool) (*Route, tcpip.Error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	log.Infof("stack.Stack.FindRoute: id %d, localAddr: %v, remoteAddr %v, netProto %d, multicastLoop %t", id, localAddr, remoteAddr, netProto, multicastLoop)
 
 	isLinkLocal := header.IsV6LinkLocalUnicastAddress(remoteAddr) || header.IsV6LinkLocalMulticastAddress(remoteAddr)
 	isLocalBroadcast := remoteAddr == header.IPv4Broadcast
@@ -1311,17 +1315,24 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 	isLoopback := header.IsV4LoopbackAddress(remoteAddr) || header.IsV6LoopbackAddress(remoteAddr)
 	needRoute := !(isLocalBroadcast || isMulticast || isLinkLocal || isLoopback)
 
+	log.Infof("stack.Stack.FindRoute: isLinkLocal: %t, isLocalBroadcast: %t, isMulticast: %t, isLoopback: %t, needRoute: %t", isLinkLocal, isLocalBroadcast, isMulticast, isLoopback, needRoute)
+
 	if s.handleLocal && !isMulticast && !isLocalBroadcast {
+		log.Infof("stack.Stack.FindRoute: trying to handle local")
 		if r := s.findLocalRouteRLocked(id, localAddr, remoteAddr, netProto); r != nil {
+			log.Infof("stack.Stack.FindRoute: succeeding in handling local")
 			return r, nil
 		}
+		log.Infof("stack.Stack.FindRoute: failed to handle local")
 	}
 
 	// If the interface is specified and we do not need a route, return a route
 	// through the interface if the interface is valid and enabled.
 	if id != 0 && !needRoute {
+		log.Infof("stack.Stack.FindRoute: interface specified and we don't need a route")
 		if nic, ok := s.nics[id]; ok && nic.Enabled() {
 			if addressEndpoint := s.getAddressEP(nic, localAddr, remoteAddr, netProto); addressEndpoint != nil {
+				log.Infof("stack.Stack.FindRoute: making a route for interface that doesn't need route")
 				return makeRoute(
 					netProto,
 					"", /* gateway */
@@ -1333,12 +1344,18 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 					s.handleLocal,
 					multicastLoop,
 				), nil
+			} else {
+				log.Infof("stack.Stack.FindRoute: failed to get an addressable endopint")
 			}
+		} else {
+			log.Infof("stack.Stack.FindRoute: failed to get nic with id %d: ok is %t and nic.Enabled() is %t", id, ok, nic.Enabled())
 		}
 
 		if isLoopback {
+			log.Infof("stack.Stack.FindRoute: isLoopback.")
 			return nil, &tcpip.ErrBadLocalAddress{}
 		}
+		log.Infof("stack.Stack.FindRoute: unreachable")
 		return nil, &tcpip.ErrNetworkUnreachable{}
 	}
 
@@ -1440,9 +1457,11 @@ func (s *Stack) FindRoute(id tcpip.NICID, localAddr, remoteAddr tcpip.Address, n
 		return nil, &tcpip.ErrHostUnreachable{}
 	}
 	if header.IsV6LoopbackAddress(remoteAddr) {
+		log.Infof("stack.Stack.FindRoute: remote is v6 loopback address")
 		return nil, &tcpip.ErrBadLocalAddress{}
 	}
 	// TODO(https://gvisor.dev/issues/8105): This should be ErrNetworkUnreachable.
+	log.Infof("stack.Stack.FindRoute: final errnetworkunreachable")
 	return nil, &tcpip.ErrNetworkUnreachable{}
 }
 
