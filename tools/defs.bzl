@@ -175,26 +175,21 @@ def go_library(name, srcs, deps = [], imports = [], stateify = True, force_add_s
     full_pkg = dirname + "/" + name
     if stateify:
         # Only do stateification for non-state packages without manual autogen.
-        # First, we need to segregate the input files via the special suffixes,
-        # and calculate the final output set.
-        state_sets = calculate_sets(srcs)
-        for (suffix, src_subset) in state_sets.items():
+        for src in [src for src in srcs if src.endswith(".go")]:
+            src_base = src[:-3]
             go_stateify(
-                name = name + suffix + "_state_autogen_with_imports",
-                srcs = src_subset,
+                name = src_base + "_state_autogen_with_imports",
+                srcs = [src],
                 imports = imports,
                 package = full_pkg,
-                out = name + suffix + "_state_autogen_with_imports.go",
+                out = src_base + "_state_autogen_with_imports.go",
             )
             go_imports(
-                name = name + suffix + "_state_autogen",
-                src = name + suffix + "_state_autogen_with_imports.go",
-                out = name + suffix + "_state_autogen.go",
+                name = src_base + "_state_autogen",
+                src = src_base + "_state_autogen_with_imports.go",
+                out = src_base + "_state_autogen.go",
             )
-        all_srcs = all_srcs + [
-            name + suffix + "_state_autogen.go"
-            for suffix in state_sets.keys()
-        ]
+            all_srcs += [src_base + "_state_autogen.go"]
 
         if force_add_state_pkg or "//pkg/state" not in all_deps:
             all_deps = all_deps + ["//pkg/state"]

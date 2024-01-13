@@ -8,8 +8,7 @@ package(
 go_library(
     name = "atomicbitops",
     srcs = [
-        "32b_32bit.go",
-        "32b_64bit.go",
+        "32bit.go",
         "aligned_32bit_unsafe.go",
         "aligned_64bit.go",
         "atomicbitops.go",
@@ -18,6 +17,7 @@ go_library(
         "atomicbitops_arm64.s",
         "atomicbitops_float64.go",
         "atomicbitops_noasm.go",
+        "bool.go",
     ],
     visibility = ["//:sandbox"],
     deps = [
