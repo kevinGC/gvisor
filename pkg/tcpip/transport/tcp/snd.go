@@ -464,13 +464,6 @@ func (s *sender) retransmitTimerExpired() tcpip.Error {
 		return nil
 	}
 
-	s.ep.stack.Stats().TCP.Timeouts.Increment()
-	s.ep.stats.SendErrors.Timeouts.Increment()
-
-	// Set TLPRxtOut to false according to
-	// https://tools.ietf.org/html/draft-ietf-tcpm-rack-08#section-7.6.1.
-	s.rc.tlpRxtOut = false
-
 	// Give up if we've waited more than a minute since the last resend or
 	// if a user time out is set and we have exceeded the user specified
 	// timeout since the first retransmission.
@@ -512,6 +505,27 @@ func (s *sender) retransmitTimerExpired() tcpip.Error {
 	if s.RTO > remaining {
 		s.RTO = remaining
 	}
+
+	// RFC 1122 4.2.2.17: Start sending zero window probes when we still see a
+	// zero receive window after retransmission interval and we have data to
+	// send.
+	if s.zeroWindowProbing {
+		s.sendZeroWindowProbe()
+		// RFC 1122 4.2.2.17: A TCP MAY keep its offered receive window closed
+		// indefinitely.  As long as the receiving TCP continues to send
+		// acknowledgments in response to the probe segments, the sending TCP
+		// MUST allow the connection to stay open.
+
+		// Return early so that the ZWP doesn't count as an RTO.
+		return nil
+	}
+
+	s.ep.stack.Stats().TCP.Timeouts.Increment()
+	s.ep.stats.SendErrors.Timeouts.Increment()
+
+	// Set TLPRxtOut to false according to
+	// https://tools.ietf.org/html/draft-ietf-tcpm-rack-08#section-7.6.1.
+	s.rc.tlpRxtOut = false
 
 	// See: https://tools.ietf.org/html/rfc6582#section-3.2 Step 4.
 	//
@@ -558,18 +572,6 @@ func (s *sender) retransmitTimerExpired() tcpip.Error {
 	// information is usable after an RTO.
 	s.ep.scoreboard.Reset()
 	s.updateWriteNext(s.writeList.Front())
-
-	// RFC 1122 4.2.2.17: Start sending zero window probes when we still see a
-	// zero receive window after retransmission interval and we have data to
-	// send.
-	if s.zeroWindowProbing {
-		s.sendZeroWindowProbe()
-		// RFC 1122 4.2.2.17: A TCP MAY keep its offered receive window closed
-		// indefinitely.  As long as the receiving TCP continues to send
-		// acknowledgments in response to the probe segments, the sending TCP
-		// MUST allow the connection to stay open.
-		return nil
-	}
 
 	seg := s.writeNext
 	// RFC 1122 4.2.3.5: Close the connection when the number of
@@ -925,11 +927,15 @@ func (s *sender) sendZeroWindowProbe() {
 	s.sendSegmentFromPacketBuffer(pkt, header.TCPFlagAck, s.SndUna-1)
 
 	// Rearm the timer to continue probing.
-	s.resendTimer.enable(s.RTO)
+	// s.resendTimer.enable(s.RTO)
 }
 
 func (s *sender) enableZeroWindowProbing() {
 	s.zeroWindowProbing = true
+
+	// Handle window shrinkage. When we get a zero window, set SND.NXT to
+	// SND.UNA.
+
 	// We piggyback the probing on the retransmit timer with the
 	// current retranmission interval, as we may start probing while
 	// segment retransmissions.
@@ -943,6 +949,12 @@ func (s *sender) disableZeroWindowProbing() {
 	s.zeroWindowProbing = false
 	s.unackZeroWindowProbes = 0
 	s.firstRetransmittedSegXmitTime = tcpip.MonotonicTime{}
+
+	// TODO: Comment
+	// ???????????????
+	s.updateWriteNext(s.writeList.Front())
+	s.Outstanding = 0
+
 	s.resendTimer.disable()
 }
 

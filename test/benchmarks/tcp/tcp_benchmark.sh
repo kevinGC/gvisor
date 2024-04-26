@@ -418,6 +418,8 @@ server_pid=\$!
 ${nsjoin_binary} /tmp/server.netns ${iperf_binary_name} ${iperf_version_arg} -p ${iperf_port} -s >&2 &
 iperf_pid=\$!
 
+tcpdump -i client.1 -w /usr/local/google/home/krakauer/gvisor/stuff.pcap &
+
 # Give services time to start.
 sleep 5
 

@@ -58,7 +58,7 @@ var (
 	addr               = flag.String("addr", "", "address for tap-based netstack")
 	mask               = flag.Int("mask", 8, "mask size for address")
 	iface              = flag.String("iface", "", "network interface name to bind for netstack")
-	sack               = flag.Bool("sack", false, "enable SACK support for netstack")
+	sack               = flag.Bool("sack", true, "enable SACK support for netstack")
 	rack               = flag.Bool("rack", false, "enable RACK in TCP")
 	moderateRecvBuf    = flag.Bool("moderate_recv_buf", true, "enable TCP Receive Buffer Auto-tuning")
 	cubic              = flag.Bool("cubic", false, "enable use of CUBIC congestion control for netstack")
@@ -525,8 +525,8 @@ func main() {
 				defer t.Stop()
 				for {
 					<-t.C
-					in.printStats()
-					out.printStats()
+					// in.printStats()
+					// out.printStats()
 				}
 			}()
 

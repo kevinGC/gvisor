@@ -545,9 +545,9 @@ func NewProtocol(s *stack.Stack) stack.TransportProtocol {
 		minRTO:                     MinRTO,
 		maxRTO:                     MaxRTO,
 		maxRetries:                 MaxRetries,
-		recovery:                   tcpip.TCPRACKLossDetection,
-		seqnumSecret:               seqnumSecret,
-		tsOffsetSecret:             tsOffsetSecret,
+		// recovery:                   tcpip.TCPRACKLossDetection,
+		seqnumSecret:   seqnumSecret,
+		tsOffsetSecret: tsOffsetSecret,
 	}
 	p.dispatcher.init(s.InsecureRNG(), runtime.GOMAXPROCS(0))
 	return &p
