@@ -467,13 +467,14 @@ func (e *endpoint) addIPHeader(srcAddr, dstAddr tcpip.Address, pkt *stack.Packet
 	// are non-atomic and need an ID.
 	ipH.Encode(&header.IPv4Fields{
 		TotalLength: uint16(length),
-		ID:          e.getID(),
-		TTL:         params.TTL,
-		TOS:         params.TOS,
-		Protocol:    uint8(params.Protocol),
-		SrcAddr:     srcAddr,
-		DstAddr:     dstAddr,
-		Options:     options,
+		// ID:          e.getID(),
+		Flags:    header.IPv4FlagDontFragment,
+		TTL:      params.TTL,
+		TOS:      params.TOS,
+		Protocol: uint8(params.Protocol),
+		SrcAddr:  srcAddr,
+		DstAddr:  dstAddr,
+		Options:  options,
 	})
 	ipH.SetChecksum(^ipH.CalculateChecksum())
 	pkt.NetworkProtocolNumber = ProtocolNumber
